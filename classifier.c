@@ -1,18 +1,26 @@
+
+
+#define _FILE_OFFSET_BITS 64
+
+
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <heap.h>
 
+
+
 //
 // gcc -g -std=c99 -I. heap.o classifier.c -o classifier.exe
 //
 
 #define PYT_L_ALLIGN 8
-#define NUM_ITEMS 3
+#define NUM_ITEMS 512
 #define BUFFER_SIZE (NUM_ITEMS*PYT_L_ALLIGN)
 
-#define NUMBER_K 2
+#define NUMBER_K 3
 
 
 #define BAD_SIZE -1
@@ -22,16 +30,16 @@
 #define BAD_PACK_SIZE -5
 
 
-#define START     0
-#define ID        1
+#define START 0
+#define ID 1
 #define T_NUM_WORDS 2
-#define T_WORD      3
-#define T_NUMBER    4
+#define T_WORD 3
+#define T_NUMBER 4
 #define NUM_WORDS 5
-#define WORD      6
-#define NUMBER    7
-#define NUM_KW    8
-#define KWORDS    9
+#define WORD 6
+#define NUMBER 7
+#define NUM_KW 8
+#define KWORDS 9
 
 
 struct MSG {
@@ -87,7 +95,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                 return BAD_NUM_ITEMS;
             pack->state = ID;
 
-            printf("   number of items: %d\n", pack->number_items);
+            printf(" number of items: %d\n", pack->number_items);
             break;
 
         case ID:
@@ -96,20 +104,23 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
             --pack->number_items;
             pack->state = T_NUM_WORDS;
 
-            printf("                id: %d\n", pack->id);
+            printf(" id: %d\n", pack->id);
             break;
 
         // TITLE
         case T_NUM_WORDS:
-            pack->t_num_words  = (long)(long)*(double*)(buffer + offset);
+            pack->t_num_words = (long)(long)*(double*)(buffer + offset);
             offset += PYT_L_ALLIGN;
-            if (!pack->t_num_words)
+            if (pack->t_num_words < 0)
                 return BAD_NUM_WORDS;
             --pack->number_items;
             pack->t_cur_word = 0;
-            pack->state = T_WORD;
+            if (pack->t_num_words)
+                pack->state = T_WORD;
+            else
+                pack->state = NUM_WORDS;
 
-            printf("   number of t words: %d\n", pack->t_num_words);
+            printf(" number of t words: %d\n", pack->t_num_words);
             break;
 
         case T_WORD:
@@ -131,11 +142,11 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                             msg->t_calc = 0;
                         }
                     }
-                }   // for messages
+                } // for messages
 
                 pack->state = T_NUMBER;
 
-                printf("           t word: %5.2f\n", *pd);
+                printf(" t word: %5.2f\n", *pd);
             }
             break;
 
@@ -151,9 +162,9 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                         msg->t_calc = 0;
                         double tmp = *pd * msg->t_words[msg->t_cur_word*2 + 1];
                         msg->t_sum += tmp;
-                        printf("  (t word match [%d] %5.2f %5.2f)\n", i, msg->t_words[msg->t_cur_word*2 + 0], msg->t_words[msg->t_cur_word*2 + 1]);
+                        printf(" (t word match [%d] %5.2f %5.2f)\n", i, msg->t_words[msg->t_cur_word*2 + 0], msg->t_words[msg->t_cur_word*2 + 1]);
                     }
-                }   // for messages
+                } // for messages
 
                 ++pack->t_cur_word;
                 if (pack->t_cur_word < pack->t_num_words)
@@ -161,21 +172,24 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                 else
                     pack->state = NUM_WORDS;
 
-                printf("         t number: %5.2f\n", *pd);
+                printf(" t number: %5.2f\n", *pd);
             }
             break;
 
         // BODY
         case NUM_WORDS:
-            pack->num_words  = (long)(long)*(double*)(buffer + offset);
+            pack->num_words = (long)(long)*(double*)(buffer + offset);
             offset += PYT_L_ALLIGN;
-            if (!pack->num_words)
+            if (pack->num_words < 0)
                 return BAD_NUM_WORDS;
             --pack->number_items;
             pack->cur_word = 0;
-            pack->state = WORD;
+            if (pack->num_words)
+                pack->state = WORD;
+            else
+                pack->state = NUM_KW;
 
-            printf("   number of words: %d\n", pack->num_words);
+            printf(" number of words: %d\n", pack->num_words);
             break;
 
         case WORD:
@@ -197,11 +211,11 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                             msg->calc = 0;
                         }
                     }
-                }   // for messages
+                } // for messages
 
                 pack->state = NUMBER;
 
-                printf("             word: %5.2f\n", *pd);
+                printf(" word: %5.2f\n", *pd);
             }
             break;
 
@@ -217,9 +231,9 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                         msg->calc = 0;
                         double tmp = *pd * msg->words[msg->cur_word*2 + 1];
                         msg->sum += tmp;
-                        printf("  (word match [%d] %5.2f %5.2f)\n", i, msg->words[msg->cur_word*2 + 0], msg->words[msg->cur_word*2 + 1]);
+                        printf(" (word match [%d] %5.2f %5.2f)\n", i, msg->words[msg->cur_word*2 + 0], msg->words[msg->cur_word*2 + 1]);
                     }
-                }   // for messages
+                } // for messages
 
                 ++pack->cur_word;
                 if (pack->cur_word < pack->num_words)
@@ -227,7 +241,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                 else
                     pack->state = NUM_KW;
 
-                printf("           number: %5.2f\n", *pd);
+                printf(" number: %5.2f\n", *pd);
             }
             break;
 
@@ -238,7 +252,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
 
             pack->state = KWORDS;
 
-            printf("      number of kw: %d\n", pack->num_kw);
+            printf(" number of kw: %d\n", pack->num_kw);
             break;
 
         case KWORDS:
@@ -249,7 +263,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
 
                 --pack->num_kw;
 
-                printf("                kw: %5.2f\n", *pd);
+                printf(" kw: %5.2f\n", *pd);
 
                 if (!pack->num_kw) {
                     // sanity check
@@ -261,8 +275,8 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                     for (int i = 0; i < messages_size; ++i) {
                         struct MSG* msg = &messages[i];
                         double total = msg->t_sum * .60 + msg->sum * .40;
-                        printf("   [%d] Title similarity %d vs %d: %5.2f\n", i, pack->id, msg->id, msg->t_sum);
-                        printf("   [%d] Body similarity %d vs %d: %5.2f Total: %5.2f\n", i, pack->id, msg->id, msg->sum, total);
+                        printf(" [%d] Title similarity %d vs %d: %5.2f\n", i, pack->id, msg->id, msg->t_sum);
+                        printf(" [%d] Body similarity %d vs %d: %5.2f Total: %5.2f\n", i, pack->id, msg->id, msg->sum, total);
 
                         if (NUMBER_K == heap_size(msg->topK)) {
                             struct heap_node* n = heap_top(msg->topK);
@@ -292,8 +306,8 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                 }
             }
             break;
-        }   // switch
-    }   // while
+        } // switch
+    } // while
 }
 
 
@@ -301,7 +315,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
 
 
 int main() {
-    FILE *fd = fopen("python_arr.txt", "r");
+    FILE *fd = fopen("python_arr.txt", "rb");
 
     unsigned char buffer[BUFFER_SIZE];
 
@@ -340,6 +354,9 @@ int main() {
     while (1) {
         size_t items_read = fread(buffer, PYT_L_ALLIGN, NUM_ITEMS, fd);
         printf("Read items: %d\n", items_read);
+	if (items_read < NUM_ITEMS) {
+		printf("WARN EOF: %d, ERR: %d\n", feof(fd), ferror(fd));
+	}
         if (!items_read)
             break;
 
@@ -375,7 +392,7 @@ int main() {
         printf("Top K [%d]\n", i);
         while (heap_size(msg->topK)) {
             struct heap_node* n = heap_top(msg->topK);
-            printf("   %d %5.2f\n", (long)n->data, n->key);
+            printf(" %d %5.2f\n", (long)n->data, n->key);
             heap_pop(msg->topK);
         }
 
@@ -386,6 +403,3 @@ int main() {
 
     return 0;
 }
-
-
-
