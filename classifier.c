@@ -1,5 +1,6 @@
 
 
+
 #define _FILE_OFFSET_BITS 64
 
 
@@ -162,17 +163,15 @@ void add_message(void* messages, long idx, long id, long t_num_words, double* t_
 }
 
 __declspec(dllexport)
-void get_message_key_words(void* messages, long idx, int** key_words, int* size) {
-    struct MSG* msg = (struct MSG*)messages + idx;
+void get_message_key_words(struct MSG* messages, int idx, int** key_words, int* size) {
+    struct MSG* msg = &messages[idx];
 
-    int i = 0;
     *size = heap_size(msg->topK);
     *key_words = (int*)malloc(*size * sizeof(int));
 
-    while (heap_size(msg->topK)) {
-        struct heap_node* n = heap_top(msg->topK);
+    for (int i = 0; i < *size; ++i) {
+        struct heap_node* n = &msg->topK->array[i];
         (*key_words)[i] = (int)n->data;
-        heap_pop(msg->topK);
     }
 }
 
@@ -180,6 +179,73 @@ __declspec(dllexport)
 void free_message_key_words(int* key_words) {
     free(key_words);
 }
+
+
+
+
+__declspec(dllexport)
+void classify(struct MSG* messages, int messages_size, const char* model, int* error, int* num_of_packs) {
+    FILE *fd = fopen(model, "rb");
+
+    unsigned char* buffer = (unsigned char*)malloc(BUFFER_SIZE);
+
+    struct STAT stat;
+    memset(&stat, 0, sizeof(struct STAT));
+
+    struct PACK* pack = allocate_pack();
+
+    while (1) {
+        size_t items_read = fread(buffer, PYT_L_ALLIGN, NUM_ITEMS, fd);
+#if defined DEBUG
+        printf("Read items: %d\n", items_read);
+#endif
+        if (items_read < NUM_ITEMS) {
+#if defined DEBUG
+            printf("WARN EOF: %d, ERR: %d\n", feof(fd), ferror(fd));
+#endif
+        }
+        if (!items_read)
+            break;
+        *error = process(messages, messages_size, pack, buffer, items_read*PYT_L_ALLIGN, &stat);
+        switch (*error) {
+        case BAD_SIZE:
+#if defined DEBUG
+            printf("#ERROR: bad size %d\n", items_read*PYT_L_ALLIGN);
+#endif
+            break;
+        case BAD_NUM_ITEMS:
+#if defined DEBUG
+            printf("#ERROR: bad num items %d\n", pack->number_items);
+#endif
+            break;
+        case BAD_NUM_WORDS:
+#if defined DEBUG
+            printf("#ERROR: bad num words %d\n", pack->num_words);
+#endif
+            break;
+        case BAD_NUM_KW:
+#if defined DEBUG
+            printf("#ERROR: bad num kw %d\n", pack->num_kw);
+#endif
+            break;
+        case BAD_PACK_SIZE:
+#if defined DEBUG
+            printf("#ERROR: bad pack size %d\n", pack->number_items);
+#endif
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    free_pack(pack);
+    free(buffer);
+    fclose(fd);
+
+    *num_of_packs = stat.number_of_packs;
+}
+
 
 
 
@@ -439,14 +505,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                         continue;
 
                     if (!msg->cross_testing || msg->cross_testing && msg->id != pack->id) {
-                        if (NUMBER_K == heap_size(msg->topK)) {
-                            struct heap_node* n = heap_top(msg->topK);
-                            if (n->key < msg->similarity) {
-                                heap_pop(msg->topK);
-                                heap_add(msg->topK, msg->similarity, (void*)(int)*pd);  // tag is a integer number represented by double (8b)
-                            }
-                        }else
-                            heap_add(msg->topK, msg->similarity, (void*)(int)*pd);
+                        heap_add(msg->topK, msg->similarity, (void*)(int)*pd);
 
                         if (msg->similarity >= FULLY_CLASSIFIED_THRESHOLD)
                             msg->classified = 1;
@@ -504,10 +563,6 @@ int main() {
     double words2[] = {3.0, 0.55011156171227904, 56.0, 0.27505578085613952, 77.0, 0.78849323845426655};
 
     //
-    FILE *fd = fopen("python_arr.txt", "rb");
-
-    unsigned char* buffer = (unsigned char*)malloc(BUFFER_SIZE);
-
     int messages_size = 2;
     struct MSG* messages = allocate_messages(messages_size);
 
@@ -521,45 +576,50 @@ int main() {
                 sizeof(words2) / sizeof(double) / 2, words2,
                 0);
 
-    struct STAT stat;
-    memset(&stat, 0, sizeof(struct STAT));
+    int number_of_packs;
+    int error;
+    classify(messages, messages_size, "..\\processed\\Model.bin", &error, &number_of_packs);
 
-    struct PACK* pack = allocate_pack();
+    switch (error) {
+    case BAD_SIZE:
+        printf("#ERROR: bad size\n");
+        break;
+    case BAD_NUM_ITEMS:
+        printf("#ERROR: bad num items\n");
+        break;
+    case BAD_NUM_WORDS:
+        printf("#ERROR: bad num words\n");
+        break;
+    case BAD_NUM_KW:
+        printf("#ERROR: bad num kw\n");
+        break;
+    case BAD_PACK_SIZE:
+        printf("#ERROR: bad pack size\n");
+        break;
 
-    while (1) {
-        size_t items_read = fread(buffer, PYT_L_ALLIGN, NUM_ITEMS, fd);
-        printf("Read items: %d\n", items_read);
-        if (items_read < NUM_ITEMS) {
-            printf("WARN EOF: %d, ERR: %d\n", feof(fd), ferror(fd));
-        }
-        if (!items_read)
-            break;
-
-        switch (process(messages, messages_size, pack, buffer, items_read*PYT_L_ALLIGN, &stat)) {
-        case BAD_SIZE:
-            printf("#ERROR: bad size %d\n", items_read*PYT_L_ALLIGN);
-            break;
-        case BAD_NUM_ITEMS:
-            printf("#ERROR: bad num items %d\n", pack->number_items);
-            break;
-        case BAD_NUM_WORDS:
-            printf("#ERROR: bad num words %d\n", pack->num_words);
-            break;
-        case BAD_NUM_KW:
-            printf("#ERROR: bad num kw %d\n", pack->num_kw);
-            break;
-        case BAD_PACK_SIZE:
-            printf("#ERROR: bad pack size %d\n", pack->number_items);
-            break;
-
-        default:
-            break;
-        }
+    default:
+        break;
     }
 
-    free_pack(pack);
-    free(buffer);
-    fclose(fd);
+
+
+    int *tags;
+    int size;
+
+    get_message_key_words(messages, 0, &tags, &size);
+    printf("Keywords[0]:\n");
+    for (int i = 0; i < size; ++i) {
+        printf("   %d\n", tags[i]);
+    }
+    free_message_key_words(tags);
+
+    get_message_key_words(messages, 1, &tags, &size);
+    printf("Keywords[1]:\n");
+    for (int i = 0; i < size; ++i) {
+        printf("   %d\n", tags[i]);
+    }
+    free_message_key_words(tags);
+
 
     // print topKs
     for (int i = 0; i < messages_size; ++i) {
@@ -573,11 +633,12 @@ int main() {
 
     }
 
+
     free_messages(messages, messages_size);
 
-    printf("Finished: number of packs checked %d\n", stat.number_of_packs);
+    printf("Finished: number of packs checked %d\n", number_of_packs);
 
     return 0;
 }
 
-#endif	// AS_LIB
+#endif        // AS_LIB
