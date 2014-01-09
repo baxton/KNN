@@ -91,7 +91,7 @@ def process(fname):
     os.chdir(PATHES['BASE'])
 
     words = trie.Trie()
-    words.load_file(PATHES['DICT'] + '\\Eng.bin', word_col=0, index_col=1)
+    words.load_file(PATHES['DICT'] + '\\Word_stem.txt', word_col=1, index_col=0)
 
     kwords = trie.Trie()
     kwords.load_file(PATHES['DICT'] + '\\Keywords.txt', word_col=0, index_col=1)
@@ -101,19 +101,15 @@ def process(fname):
     with open(fname, 'r') as fin:
         with open(PATHES['PROCESSED'] + '\\Model.bin', 'wb+') as fout:
             reader = csv.DictReader(fin)
-            first = True
             for l in reader:
-                if not first:
-                    id = int(l['Id'])
-                    title = words.tokenize(l['Title'])
-                    body = words.tokenize(l['Body'])
-                    tags = kwords.tokenize(l['Tags'])
+                id = int(l['Id'])
+                title = words.tokenize(l['Title'])
+                body = words.tokenize(l['Body'])
+                tags = kwords.tokenize(l['Tags'])
 
-                    save_to_file(fout, id, title, body, tags)
-                    if 0 == lines % 50000:
-                        print lines, 'last id: ', id
-                else:
-                    first = False
+                save_to_file(fout, id, title, body, tags)
+                if 0 == lines % 50000:
+                    print lines, 'last id: ', id
 
                 lines += 1
 
@@ -123,7 +119,7 @@ def main():
     os.chdir(PATHES['BASE'])
 
     # keywords fetching
-##    fetch_keywords(PATHES['BASE'] + '\\Train.csv', PATHES['DICT'] + '\\Keywords.txt')
+## fetch_keywords(PATHES['BASE'] + '\\Train.csv', PATHES['DICT'] + '\\Keywords.txt')
 
     start = dt.now()
     process('Train.csv')
