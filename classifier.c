@@ -1,6 +1,3 @@
-
-
-
 #define _FILE_OFFSET_BITS 64
 
 
@@ -15,6 +12,7 @@
 
 //
 // gcc -g -std=c99 -I. heap.o classifier.c -o classifier.exe
+// gcc -g -std=c99 -DAS_LIB -I. heap.o classifier.c -shared -o classifier.dll
 //
 
 #define PYT_L_ALLIGN 8
@@ -134,6 +132,10 @@ void free_messages(struct MSG* p, int size) {
     for (int i = 0; i < size; ++i) {
         struct MSG* msg = &p[i];
         free_heap(msg->topK);
+        //if (msg->t_words)
+        //   free(msg->t_words);
+        //if (msg->words)
+        //    free(msg->words);
     }
     free(p);
 }
@@ -147,10 +149,14 @@ void add_message(void* messages, long idx, long id, long t_num_words, double* t_
     msg->t_num_words = t_num_words;
     msg->t_cur_word = 0;
     msg->t_words = t_words;
+    //msg->t_words = (double*)malloc(t_num_words * 2 * sizeof(double));
+    //memcpy(msg->t_words, t_words, t_num_words * 2 * sizeof(double));
 
     msg->num_words = num_words;
     msg->cur_word = 0;
     msg->words = words;
+    //msg->words =(double*)malloc(num_words * 2 * sizeof(double));
+    //memcpy(msg->words, words, num_words * 2 * sizeof(double));
 
     msg->cross_testing = cross_testing;
     msg->classified = 0;
@@ -166,12 +172,13 @@ __declspec(dllexport)
 void get_message_key_words(struct MSG* messages, int idx, int** key_words, int* size) {
     struct MSG* msg = &messages[idx];
 
-    *size = heap_size(msg->topK);
+    *size = heap_size(msg->topK) * 2;
     *key_words = (int*)malloc(*size * sizeof(int));
 
-    for (int i = 0; i < *size; ++i) {
+    for (int i = 0; i < *size/2; ++i) {
         struct heap_node* n = &msg->topK->array[i];
-        (*key_words)[i] = (int)n->data;
+        (*key_words)[i*2+0] = (int)n->data;
+        (*key_words)[i*2+1] = (int)(n->key*100);
     }
 }
 
@@ -180,7 +187,11 @@ void free_message_key_words(int* key_words) {
     free(key_words);
 }
 
-
+__declspec(dllexport)
+int get_message_id(struct MSG* messages, int idx) {
+    struct MSG* msg = &messages[idx];
+    return msg->id;
+}
 
 
 __declspec(dllexport)
@@ -327,10 +338,10 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
 
                     if (msg->t_cur_word < msg->t_num_words) {
                         while (msg->t_cur_word < msg->t_num_words && msg->t_words[msg->t_cur_word*2 + 0] < *pd) {
-                            ++msg->t_cur_word;
+                            msg->t_cur_word += 1;
                         }
 
-                        if (msg->t_cur_word < msg->t_num_words && msg->t_words[msg->t_cur_word*2+0] == *pd) {
+                        if (msg->t_cur_word < msg->t_num_words && msg->t_words[msg->t_cur_word*2 + 0] == *pd) {
                             msg->t_calc = 1;
                         }else{
                             msg->t_calc = 0;
@@ -364,7 +375,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                     }
                 } // for messages
 
-                ++pack->t_cur_word;
+                pack->t_cur_word += 1;
                 if (pack->t_cur_word < pack->t_num_words)
                     pack->state = T_WORD;
                 else
@@ -409,7 +420,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
 
                     if (msg->cur_word < msg->num_words) {
                         while (msg->cur_word < msg->num_words && msg->words[msg->cur_word*2 + 0] < *pd) {
-                            ++msg->cur_word;
+                            msg->cur_word += 1;
                         }
 
                         if (msg->cur_word < msg->num_words && msg->words[msg->cur_word*2+0] == *pd) {
@@ -446,7 +457,7 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                     }
                 } // for messages
 
-                ++pack->cur_word;
+                pack->cur_word += 1;
                 if (pack->cur_word < pack->num_words)
                     pack->state = WORD;
                 else
@@ -501,16 +512,28 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
                     struct MSG* msg = &messages[i];
 
                     // skip if already classified
-                    if (msg->classified)
-                        continue;
+                    if (msg->classified) {
+                        if (msg->classified == pack->id) {
+                            // it's classified from this pack
+                            if (!msg->cross_testing || msg->cross_testing && msg->id != pack->id)
+                                heap_add(msg->topK, msg->similarity, (void*)(int)*pd);
+                        }else{
+                            continue;
+                        }
+                    }else{
+                        if (!msg->cross_testing || msg->cross_testing && msg->id != pack->id) {
 
-                    if (!msg->cross_testing || msg->cross_testing && msg->id != pack->id) {
-                        heap_add(msg->topK, msg->similarity, (void*)(int)*pd);
+                            if (msg->similarity >= FULLY_CLASSIFIED_THRESHOLD) {
+                                msg->classified = pack->id;
+                                // remove everything previously accumulated
+                                while (heap_size(msg->topK))
+                                    heap_pop(msg->topK);
+                            }
 
-                        if (msg->similarity >= FULLY_CLASSIFIED_THRESHOLD)
-                            msg->classified = 1;
+
+                            heap_add(msg->topK, msg->similarity, (void*)(int)*pd);
+                        }
                     }
-
                 }
 
 #if defined DEBUG
@@ -547,6 +570,8 @@ int process(struct MSG* messages, int messages_size, struct PACK* pack, unsigned
             break;
         } // switch
     } // while
+
+    return 0;
 }
 
 
@@ -609,14 +634,14 @@ int main() {
     get_message_key_words(messages, 0, &tags, &size);
     printf("Keywords[0]:\n");
     for (int i = 0; i < size; ++i) {
-        printf("   %d\n", tags[i]);
+        printf(" %d\n", tags[i]);
     }
     free_message_key_words(tags);
 
     get_message_key_words(messages, 1, &tags, &size);
     printf("Keywords[1]:\n");
     for (int i = 0; i < size; ++i) {
-        printf("   %d\n", tags[i]);
+        printf(" %d\n", tags[i]);
     }
     free_message_key_words(tags);
 
@@ -641,4 +666,4 @@ int main() {
     return 0;
 }
 
-#endif        // AS_LIB
+#endif // AS_LIB
