@@ -70,6 +70,16 @@ using namespace std;
 
 // this came from the problem description
 #define MAX_N 1024
+#define MAX_N_MASK (MAX_N-1)
+
+#define NO_X  -2000000
+#define NO_Y  -2000000
+
+
+#define DIR_TL  1
+#define DIR_TR  2
+#define DIR_BR  4
+#define DIR_BL  8
 
 
 
@@ -105,6 +115,12 @@ struct rect {
         new_i(0),
         sq(0.)
     {}
+
+    bool intersect(const rect& other) const {
+        bool no_intersection = (x + w <= other.x) || (other.x + other.w <= x) ||
+                               (y + h <= other.y) || (other.y + other.h <= y);
+        return !no_intersection;
+    }
 
     int change_orientation() {
         o = O_AY >> o;
@@ -154,57 +170,52 @@ ostream& operator<< (ostream& os, const rect& r) {
 #endif
 
 class connection_points {
-    deque<int> storage;
+    int storage[MAX_N] __attribute__((aligned(16)));
+    int begin;
+    int end;
+    int count;
     int prev_size;
 public:
     connection_points() :
-        storage(),
+        begin(0),
+        end(0),
+        count(0),
         prev_size(-1)
     {}
 
-    bool empty() {return storage.empty();}
+    bool empty() {return !count;}
+
+    void copy(connection_points& cps) {
+        ::copy(cps.storage, storage, MAX_N * sizeof(int));
+        cps.begin = begin;
+        cps.end = end;
+        cps.count = count;
+        cps.prev_size = prev_size;
+    }
 
     void add(int i) {
-        storage.push_back(i);
+#if defined DEBUG
+        if (count == MAX_N)
+            DBUG1("ERROR: Connection point queue is FULL")
+#endif
+        storage[begin] = i;
+        begin = ++begin & MAX_N_MASK;
+        ++count;
     }
 
     int next() {
-        return storage.front();
+        return storage[end];
     }
 
-    // Logic:
-    // 1) fix - remember current size
-    // 2) add new points
-    // 3) erase
-    // 4) unfix
-/*
-    // [start, end] inclusive range
-    void erase(int start, int end) {
-        if (start < end) {
-            if (fix >= end)
-                storage.erase(storage.begin()+start, storage.begin()+end + 1);
-            else {
-                storage.erase(storage.begin(), storage.begin() + fix);
-                end -= fix;
-                storage.erase(storage.begin(), storage.begin() + end + 1);
-            }
-        }
-        else if (start > end) {
-            storage.erase(storage.begin()+start, storage.end());
-            storage.erase(storage.begin(), storage.begin() + end + 1);
-        }
-        else {
-            // erase all before fix
-            storage.erase(storage.begin(), storage.begin() + fix);
-        }
+    void pop() {
+#if defined DEBUG
+        if (!count)
+            DBUG1("ERROR: Connection point queue is empty")
+#endif
+        end = ++end & MAX_N_MASK;
+        --count;
     }
-*/
-    void fix() {
-        prev_size = storage.size();
-    }
-    void unfix() {
-        prev_size = -1;
-    }
+
 
 } __attribute__((aligned(16)));
 
@@ -212,9 +223,36 @@ public:
 class Ray {
     rect rectangles_[MAX_N];
     connection_points cp_;
+    int indices_sorted_[MAX_N];
+    int N;
+
+    // for sorting by squareness and length, DESC order
+    struct cmp_sq_len_desc {
+        const rect* rectangles_;
+
+        cmp_sq_len_desc(const rect* rectangles) :
+            rectangles_(rectangles)
+        {}
+
+        bool operator() (int a, int b) {
+            const rect& r1 = rectangles_[a];
+            const rect& r2 = rectangles_[b];
+            return (r1.sq > r2.sq) || (r1.sq == r2.sq and r1.len > r2.len);
+        }
+    };
 
 public:
-    Ray() {}
+    Ray() : N(0) {
+        for (int i = 0; i < MAX_N; ++i) {
+            indices_sorted_[i] = i;
+        }
+    }
+
+    void set_N(int n) { N = n; }
+
+    void arg_sort() {
+        sort(&indices_sorted_[0], &indices_sorted_[N], cmp_sq_len_desc(rectangles_));
+    }
 
     rect* rectangles() {
         return rectangles_;
@@ -308,7 +346,7 @@ struct AutoObj {
 
     ~AutoObj() {free();}
 
-    bool initialised() {return NOTHING != oh;}
+    bool initialised() const {return NOTHING != oh;}
 
     T* get() {return global_heap.get_object(oh);}
 
@@ -344,7 +382,7 @@ struct AutoObj {
         AutoObj<Ray> tmp;
         tmp.alloc();
         ::copy(tmp.get()->rectangles(), get()->rectangles(), MAX_N * sizeof(rect));
-        //::copy(tmp.get().points(), get().points(), MAX_N * sizeof(connection_points));
+        get()->points().copy(tmp.get()->points());
         return tmp;
     }
 };
@@ -364,35 +402,483 @@ class RectanglesAndHoles {
     int N;
     AutoRay beam[BEAM_WIDTH];
 
-    // for sorting by squareness and length, DESC order
-    struct cmp_sq_len_desc {
-        bool operator() (const rect& r1, const rect& r2) {
-            return (r1.sq > r2.sq) || (r1.sq == r2.sq and r1.len > r2.len);
-        }
-    };
-
 public:
     RectanglesAndHoles() :
         N(0)
     {}
 
 
-    void make_child(Ray& ray) {
-
+    bool has_intersection(const rect& r, const rect* rectangles) const {
+        for (int i = 0; i < N; ++i) {
+            const rect& cur = rectangles[i];
+            if (cur.i != r.i) {
+                if (r.intersect(cur))
+                    return true;
+            }
+        }
+        return false;
     }
 
-    void run_beam() {/*
-        for (int b = 0; b < BEAM_WIDTH; ++b) {
-            ray = beam[b];
-            array c = make_child(ray);
-            ray.swap(c);
-        }*/
+    void get_leg_tl(const rect* start, rect* rectangles, int& current_idx, int leg_len, rect** finish,
+                    int x_block=NO_X, int y_block=NO_Y, bool check_intersection=true) {
+
+        if (!start) {
+            DBUG1("ERROR: start was not provided for DIR_TL")
+            return;
+        }
+
+        *finish = NULL;
+
+        int cur_len = 0;
+
+        const rect* prev = start;
+
+        for (; current_idx < N; ++current_idx) {
+            rect& r = rectangles[current_idx];
+            if (r.used) {
+                DBUG2("Skip used: ", r.i)
+            }
+            else {
+                DBUG2("Rect in TL: ", r.i)
+
+                //if (r.o == rect::O_AX)
+                //    r.change_orientation();
+
+                if ((x_block == NO_X || x_block < prev->x - r.w) && (y_block == NO_Y || y_block > prev->y + prev->h)) {
+                    r.x = prev->x - r.w;
+                    r.y = prev->y + prev->h;
+
+                    if (check_intersection && has_intersection(r, rectangles)) {
+                        DBUG1("intersection!!!")
+                        break;
+                    }
+                    else {
+                        r.used = 1;
+                        prev = &r;
+                        *finish = &r;
+                        ++cur_len;
+                        if (cur_len >= leg_len) {
+                            ++current_idx;
+                            break;
+                        }
+                    }
+                }
+                else{
+                    break;
+                }
+            }
+        }   // while
     }
 
-    // what it does is initialize new_indices after sorting
-    void update_indices(rect* rectangles) {
-        for (int i = 0; i < N; ++i)
-            rectangles[i].new_i = i;
+    void get_leg_bl(const rect* start, rect* rectangles, int& current_idx, int leg_len, rect** finish,
+                 int x_block=NO_X, int y_block=NO_Y, bool check_intersection=true) {
+
+        if (!start) {
+            DBUG1("ERROR: start was not provided for DIR_BL")
+            return;
+        }
+
+        *finish = NULL;
+
+        int cur_len = 0;
+
+        const rect* prev = start;
+
+        for (; current_idx < N; ++current_idx) {
+            rect& r = rectangles[current_idx];
+            if (r.used) {
+                DBUG2("Skip used: ", r.i)
+            }
+            else {
+                DBUG2("Rect in BL: ", r.i)
+
+                //if (r.o == rect::O_AY)
+                //    r.change_orientation();
+
+                if ((x_block == NO_X || x_block < prev->x - r.w) && (y_block == NO_Y || y_block < prev->y - r.h)) {
+                    r.x = prev->x - r.w;
+                    r.y = prev->y - r.h;
+
+                    if (check_intersection && has_intersection(r, rectangles)) {
+                        DBUG1("intersection!!!")
+                        break;
+                    }
+                    else {
+                        r.used = 1;
+                        prev = &r;
+                        *finish = &r;
+                        ++cur_len;
+                        if (cur_len >= leg_len) {
+                            ++current_idx;
+                            break;
+                        }
+                    }
+                }
+                else {
+                    break;
+                }
+            }   // while
+        }
+    }
+
+
+
+    bool get_leg(const rect* start, rect* rectangles, int& current_idx, int leg_len, int direction, rect** finish,
+                 int x_block=NO_X, int y_block=NO_Y) {
+        bool result = false;
+        int cur_len = 0;
+
+        DBUG2("Direction: ", direction)
+
+        const rect* prev = start;
+
+        for (; current_idx < N; ++current_idx) {
+            rect& r = rectangles[current_idx];
+            if (r.used) {
+                DBUG2("Skip: ", r.used)
+                continue;
+            }
+
+            bool goon = true;
+
+            switch (direction) {
+            case DIR_TL:
+                //if (r.o == rect::O_AX)
+                //    r.change_orientation();
+                if ((x_block == NO_X || x_block < prev->x - r.w) && (y_block == NO_Y || y_block > prev->y + prev->h)) {
+                    r.x = prev->x - r.w;
+                    r.y = prev->y + prev->h;
+                }
+                else
+                    goon = false;
+                break;
+
+            case DIR_TR:
+                //if (r.o == rect::O_AY)
+                //    r.change_orientation();
+                if ((x_block == NO_X || x_block > prev->x + prev->w) && (y_block == NO_Y || y_block > prev->y + prev->h)) {
+                    r.x = prev->x + prev->w;
+                    r.y = prev->y + prev->h;
+                }
+                else
+                    goon = false;
+                break;
+
+            case DIR_BR:
+                //if (r.o == rect::O_AX)
+                //    r.change_orientation();
+                if ((x_block == NO_X || x_block > prev->x + prev->w) && (y_block == NO_Y || y_block < prev->y - r.h)) {
+                    r.x = prev->x + prev->w;
+                    r.y = prev->y - r.h;
+                }
+                else
+                    goon = false;
+                break;
+
+            case DIR_BL:
+                //if (r.o == rect::O_AY)
+                //    r.change_orientation();
+                if ((x_block == NO_X || x_block < prev->x - r.w) && (y_block == NO_Y || y_block < prev->y - r.h)) {
+                    r.x = prev->x - r.w;
+                    r.y = prev->y - r.h;
+                }
+                else
+                    goon = false;
+                break;
+            }
+
+            if (goon) {
+                if (has_intersection(r, rectangles)) {
+                    DBUG1("intersection!!!")
+                    break;
+                }
+                else {
+                    r.used = 1;
+                    prev = &r;
+                    *finish = &r;
+                    ++cur_len;
+                    if (cur_len >= leg_len) {
+                        ++current_idx;
+                        break;
+                    }
+                }
+            }
+            else{
+                break;
+            }
+        }   // while
+
+        return (cur_len == leg_len);
+    }
+
+
+    void make_romb(rect* start, rect* rectangles, int* start_idx, int leg_len, rect** ret_bottom, rect** ret_left, rect** ret_top, rect** ret_right) {
+
+        int current_idx = *start_idx;
+
+        rect* bottom = start;
+        rect* left = *ret_left;
+        rect* top = *ret_top;
+        rect* right = *ret_right;
+
+        vector<int> l1;
+        vector<int> l2;
+        vector<int> l3;
+        vector<int> l4;
+
+        rect* finish = NULL;
+        if (!left) {
+            get_leg_tl(start, rectangles, current_idx, leg_len, &finish, NO_X, NO_Y, false);
+            left = finish;
+        }
+        else {
+            finish = left;
+        }
+
+        if (!top) {
+            get_leg(finish, rectangles, current_idx, leg_len, DIR_TR, &finish, start->x+start->w, NO_Y);
+            top = finish;
+        }
+        else {
+            finish = top;
+        }
+
+        if (!right) {
+            get_leg(finish, rectangles, current_idx, leg_len, DIR_BR, &finish, NO_X, left->y);
+            right = finish;
+        }
+        else {
+            finish = right;
+        }
+
+        rect* tmp = NULL;
+        get_leg_bl(finish, rectangles, current_idx, leg_len, &tmp, start->x + start->w, start->y);
+
+*ret_bottom = bottom;
+*ret_left = left;
+*ret_top = top;
+*ret_right = right;
+*start_idx = current_idx;
+return;
+
+        if (tmp) {
+            finish = tmp;
+
+            rect* tmp_right = right;
+            while (bottom->y < finish->y) {
+                DBUG2("BottomY: ", bottom->y)
+                DBUG2("FinishY: ", finish->y)
+                tmp = NULL;
+                DBUG2("NewRight: ", tmp_right->i)
+                get_leg(tmp_right, rectangles, current_idx, 1, DIR_BR, &tmp);
+                if (tmp) {
+                    int dx = tmp_right->w;
+                    int dy = tmp->h;
+                    DBUG2("Right: ", right->i)
+                    DBUG2("Finish: ", finish->i)
+
+                    for (int i = right->i+1; i < finish->i+1; ++i) {
+                        DBUG2("Rect: ", i)
+                        rect& r = rectangles[i];
+                        r.x += dx;
+                        r.y -= dy;
+                    }
+                    tmp_right = tmp;
+                }
+                else {
+                    right = tmp_right;
+                    break;
+                }
+            }
+
+            tmp = NULL;
+            do {
+                DBUG1("Start converging")
+                tmp = NULL;
+                get_leg(bottom, rectangles, current_idx, 1, DIR_BR, &tmp);
+                if (tmp) {
+                    //
+                    bottom = tmp;
+
+                    tmp = NULL;
+                    get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
+                    if (tmp) {
+                        finish = tmp;
+                    }
+                }
+            } while (tmp);
+
+            if (finish->x <= bottom->x + bottom->w) {
+                if (bottom->y < finish->y) {
+                    DBUG1("Connecting bottom -> finish")
+                    tmp = NULL;
+                    get_leg(bottom, rectangles, current_idx, 1, DIR_BR, &tmp);
+                    if (tmp) {
+                        while (!has_intersection(*tmp, rectangles)) {
+                            tmp->y += 1;
+                        }
+                        tmp->y -= 1;
+
+                        if (bottom->y > tmp->y)
+                            bottom = tmp;
+
+                        while (tmp && tmp->y > bottom->y + bottom->h) {
+                            tmp = NULL;
+                            get_leg(bottom, rectangles, current_idx, 1, DIR_BR, &tmp);
+                            if (tmp) {
+                                while (!has_intersection(*tmp, rectangles)) {
+                                    tmp->y += 1;
+                                }
+                                tmp->y -= 1;
+                                if (bottom->y > tmp->y)
+                                    bottom = tmp;
+                            }
+                        }
+                    }
+                }
+                else {
+                    DBUG1("Connecting finish -> bottom")
+                    tmp = NULL;
+                    get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
+                    if (tmp) {
+                        // move it up
+                        while (!has_intersection(*tmp, rectangles)) {
+                            tmp->y += 1;
+                        }
+                        tmp->y -= 1;
+
+                        if (bottom->y > tmp->y)
+                            bottom = tmp;
+
+                        while (tmp && tmp->y > finish->y + finish->h) {
+                            tmp = NULL;
+                            get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
+                            if (tmp) {
+                                while (!has_intersection(*tmp, rectangles)) {
+                                    tmp->y += 1;
+                                }
+                                tmp->y -= 1;
+                                if (bottom->y > tmp->y)
+                                    bottom = tmp;
+                            }
+                        }
+                    }
+                    else {
+                        // need to move it down
+                        rect* tmp = &rectangles[current_idx++];
+                        tmp->x = finish->x + tmp->w;
+                        tmp->y = finish->y + finish->h;
+                        while (!has_intersection(*tmp, rectangles)) {
+                            tmp->y -= 1;
+                        }
+                        tmp->y += 1;
+                        if (bottom->y > tmp->y)
+                        bottom = tmp;
+                    }
+
+                    if (bottom->y > finish->y)
+                        bottom = finish;
+                }
+            }
+            else {
+                // horizontal connecting
+                rect* tmp_bottom = bottom;
+                int dir = DIR_TL;
+                do {
+                    tmp = NULL;
+                    get_leg(finish, rectangles, current_idx, 1, dir, &tmp);
+                    if (tmp) {
+                        if (tmp_bottom->y > tmp->y)
+                            tmp_bottom = tmp;
+                        finish = tmp;
+
+                        if (DIR_TL == dir)
+                            dir = DIR_BL;
+                        else
+                            dir = DIR_TL;
+                    }
+                } while (tmp);
+
+                get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
+                while (tmp) {
+                    while (!has_intersection(*tmp, rectangles)) {
+                        tmp->x -= 1;
+                    }
+                    tmp->x += 1;
+                    if (tmp_bottom->y > tmp->y)
+                        tmp_bottom = tmp;
+                    tmp = NULL;
+                    get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
+                }
+                if (tmp_bottom->y < bottom->y)
+                    bottom = tmp_bottom;
+            }
+        }
+        else {
+            // small romb
+            tmp = NULL;
+            get_leg(right, rectangles, current_idx, leg_len, DIR_BL, &tmp);
+            if (tmp) {
+                finish = tmp;
+                tmp = NULL;
+                get_leg(finish, rectangles, current_idx, 1, DIR_TL, &tmp);
+                while (tmp) {
+                    while (!has_intersection(*tmp, rectangles)) {
+                        tmp->y -= 1;
+                    }
+                    tmp->y += 1;
+                    tmp = NULL;
+                    get_leg(finish, rectangles, current_idx, 1, DIR_TL, &tmp);
+                }
+                if (bottom->y < finish->y)
+                    bottom = finish;
+            }
+        }
+
+        *ret_bottom = bottom;
+        *ret_left = left;
+        *ret_top = top;
+        *ret_right = right;
+
+        *start_idx = current_idx;
+    }
+
+    void run_beam() {
+        Ray* pray = beam[0].get();
+        rect* rectangles = pray->rectangles();
+
+        rect* ret_bottom = NULL;
+        rect* ret_left   = NULL;
+        rect* ret_top    = NULL;
+        rect* ret_right  = NULL;
+
+        rect* start = &rectangles[0];
+        start->x = 0;
+        start->y = 0;
+        start->used = 1;
+
+        int start_idx = 1;
+
+        int leg_len = 10;
+
+        make_romb(start, rectangles, &start_idx, leg_len, &ret_bottom, &ret_left, &ret_top, &ret_right);
+        for (int i = 0; i < 100; ++i) {
+            if (!ret_right || ! ret_top)
+                break;
+
+            start = ret_right;
+            rect* ret_bottom2 = NULL;
+            rect* ret_left2   = ret_top;
+            rect* ret_top2    = NULL;
+            rect* ret_right2  = NULL;
+
+            make_romb(start, rectangles, &start_idx, leg_len, &ret_bottom2, &ret_left2, &ret_top2, &ret_right2);
+
+            ret_bottom = ret_bottom2;
+            ret_top = ret_top2;
+            ret_right = ret_right2;
+            ret_left = ret_left2;
+        }
     }
 
     int start(vector<int>& A, vector<int>&B) {
@@ -406,21 +892,12 @@ public:
         // init 1st array and populate it
         beam[0].alloc();
         Ray* pray = beam[0].get();
+        pray->set_N(N);
         rect* rectangles = pray->rectangles();
         for (int i = 0; i < N; ++i) {
             rect& r = rectangles[i];
             r.init(A[i], B[i], i);
         }
-for (int i = 0; i < 1000000; ++i)
-        sort(&rectangles[0], &rectangles[N], cmp_sq_len_desc());
-        update_indices(rectangles);
-
-        // put the very first rect to [0,0]
-        rectangles[0].x = 0;
-        rectangles[0].y = 0;
-        rectangles[0].used = 1;
-        rectangles[0].cp = rect::CP_TR;
-
 
         run_beam();
 
@@ -436,7 +913,7 @@ for (int i = 0; i < 1000000; ++i)
         // all rectangles which are not used will be put into a straight row
         vector<int> result(N*3, 0);
         int x = 0;
-        int y = -5000;
+        int y = -50000;
         rect* rectangles = beam[best_ray_idx].get()->rectangles();
         for (int i = 0; i < N; ++i) {
             rect& r = rectangles[i];
