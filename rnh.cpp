@@ -250,9 +250,12 @@ public:
 
     void set_N(int n) { N = n; }
 
-    void arg_sort() {
-        sort(&indices_sorted_[0], &indices_sorted_[N], cmp_sq_len_desc(rectangles_));
+    int* arg_sort() {
+        std::sort(&indices_sorted_[0], &indices_sorted_[N], cmp_sq_len_desc(rectangles_));
+        return indices_sorted_;
     }
+
+
 
     rect* rectangles() {
         return rectangles_;
@@ -411,15 +414,17 @@ public:
     bool has_intersection(const rect& r, const rect* rectangles) const {
         for (int i = 0; i < N; ++i) {
             const rect& cur = rectangles[i];
-            if (cur.i != r.i) {
-                if (r.intersect(cur))
+            if (cur.used && cur.i != r.i) {
+                if (r.intersect(cur)) {
+                    DBUG2("Intersect: ", cur.i)
                     return true;
+                }
             }
         }
         return false;
     }
 
-    void get_leg_tl(const rect* start, rect* rectangles, int& current_idx, int leg_len, rect** finish,
+    void get_leg_tl(const rect* start, rect* rectangles, int* indices_sorted, int& current_idx, int leg_len, rect** finish,
                     int x_block=NO_X, int y_block=NO_Y, bool check_intersection=true) {
 
         if (!start) {
@@ -434,7 +439,7 @@ public:
         const rect* prev = start;
 
         for (; current_idx < N; ++current_idx) {
-            rect& r = rectangles[current_idx];
+            rect& r = rectangles[indices_sorted[current_idx]];
             if (r.used) {
                 DBUG2("Skip used: ", r.i)
             }
@@ -470,7 +475,7 @@ public:
         }   // while
     }
 
-    void get_leg_bl(const rect* start, rect* rectangles, int& current_idx, int leg_len, rect** finish,
+    void get_leg_bl(const rect* start, rect* rectangles, int* indices_sorted, int& current_idx, int leg_len, rect** finish, vector<int>& indices,
                  int x_block=NO_X, int y_block=NO_Y, bool check_intersection=true) {
 
         if (!start) {
@@ -485,7 +490,7 @@ public:
         const rect* prev = start;
 
         for (; current_idx < N; ++current_idx) {
-            rect& r = rectangles[current_idx];
+            rect& r = rectangles[indices_sorted[current_idx]];
             if (r.used) {
                 DBUG2("Skip used: ", r.i)
             }
@@ -507,6 +512,7 @@ public:
                         r.used = 1;
                         prev = &r;
                         *finish = &r;
+                        indices.push_back(current_idx);
                         ++cur_len;
                         if (cur_len >= leg_len) {
                             ++current_idx;
@@ -523,7 +529,7 @@ public:
 
 
 
-    bool get_leg(const rect* start, rect* rectangles, int& current_idx, int leg_len, int direction, rect** finish,
+    bool get_leg(const rect* start, rect* rectangles, int* indices_sorted, int& current_idx, int leg_len, int direction, rect** finish,
                  int x_block=NO_X, int y_block=NO_Y) {
         bool result = false;
         int cur_len = 0;
@@ -533,7 +539,7 @@ public:
         const rect* prev = start;
 
         for (; current_idx < N; ++current_idx) {
-            rect& r = rectangles[current_idx];
+            rect& r = rectangles[indices_sorted[current_idx]];
             if (r.used) {
                 DBUG2("Skip: ", r.used)
                 continue;
@@ -612,7 +618,7 @@ public:
     }
 
 
-    void make_romb(rect* start, rect* rectangles, int* start_idx, int leg_len, rect** ret_bottom, rect** ret_left, rect** ret_top, rect** ret_right) {
+    void make_romb(rect* start, rect* rectangles, int* indices_sorted, int* start_idx, int leg_len, rect** ret_bottom, rect** ret_left, rect** ret_top, rect** ret_right) {
 
         int current_idx = *start_idx;
 
@@ -628,7 +634,7 @@ public:
 
         rect* finish = NULL;
         if (!left) {
-            get_leg_tl(start, rectangles, current_idx, leg_len, &finish, NO_X, NO_Y, false);
+            get_leg_tl(start, rectangles, indices_sorted, current_idx, leg_len, &finish, NO_X, NO_Y, false);
             left = finish;
         }
         else {
@@ -636,7 +642,7 @@ public:
         }
 
         if (!top) {
-            get_leg(finish, rectangles, current_idx, leg_len, DIR_TR, &finish, start->x+start->w, NO_Y);
+            get_leg(finish, rectangles, indices_sorted, current_idx, leg_len, DIR_TR, &finish, start->x+start->w, NO_Y);
             top = finish;
         }
         else {
@@ -644,196 +650,21 @@ public:
         }
 
         if (!right) {
-            get_leg(finish, rectangles, current_idx, leg_len, DIR_BR, &finish, NO_X, left->y);
+            get_leg(finish, rectangles, indices_sorted, current_idx, leg_len, DIR_BR, &finish, NO_X, left->y);
             right = finish;
         }
         else {
             finish = right;
         }
 
+        vector<int> indices_bl;
+        indices_bl.reserve(leg_len);
+
         rect* tmp = NULL;
-        get_leg_bl(finish, rectangles, current_idx, leg_len, &tmp, start->x + start->w, start->y);
+        get_leg_bl(finish, rectangles, indices_sorted, current_idx, leg_len, &tmp, indices_bl, start->x + start->w, start->y);
 
-*ret_bottom = bottom;
-*ret_left = left;
-*ret_top = top;
-*ret_right = right;
-*start_idx = current_idx;
-return;
-
-        if (tmp) {
-            finish = tmp;
-
-            rect* tmp_right = right;
-            while (bottom->y < finish->y) {
-                DBUG2("BottomY: ", bottom->y)
-                DBUG2("FinishY: ", finish->y)
-                tmp = NULL;
-                DBUG2("NewRight: ", tmp_right->i)
-                get_leg(tmp_right, rectangles, current_idx, 1, DIR_BR, &tmp);
-                if (tmp) {
-                    int dx = tmp_right->w;
-                    int dy = tmp->h;
-                    DBUG2("Right: ", right->i)
-                    DBUG2("Finish: ", finish->i)
-
-                    for (int i = right->i+1; i < finish->i+1; ++i) {
-                        DBUG2("Rect: ", i)
-                        rect& r = rectangles[i];
-                        r.x += dx;
-                        r.y -= dy;
-                    }
-                    tmp_right = tmp;
-                }
-                else {
-                    right = tmp_right;
-                    break;
-                }
-            }
-
-            tmp = NULL;
-            do {
-                DBUG1("Start converging")
-                tmp = NULL;
-                get_leg(bottom, rectangles, current_idx, 1, DIR_BR, &tmp);
-                if (tmp) {
-                    //
-                    bottom = tmp;
-
-                    tmp = NULL;
-                    get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
-                    if (tmp) {
-                        finish = tmp;
-                    }
-                }
-            } while (tmp);
-
-            if (finish->x <= bottom->x + bottom->w) {
-                if (bottom->y < finish->y) {
-                    DBUG1("Connecting bottom -> finish")
-                    tmp = NULL;
-                    get_leg(bottom, rectangles, current_idx, 1, DIR_BR, &tmp);
-                    if (tmp) {
-                        while (!has_intersection(*tmp, rectangles)) {
-                            tmp->y += 1;
-                        }
-                        tmp->y -= 1;
-
-                        if (bottom->y > tmp->y)
-                            bottom = tmp;
-
-                        while (tmp && tmp->y > bottom->y + bottom->h) {
-                            tmp = NULL;
-                            get_leg(bottom, rectangles, current_idx, 1, DIR_BR, &tmp);
-                            if (tmp) {
-                                while (!has_intersection(*tmp, rectangles)) {
-                                    tmp->y += 1;
-                                }
-                                tmp->y -= 1;
-                                if (bottom->y > tmp->y)
-                                    bottom = tmp;
-                            }
-                        }
-                    }
-                }
-                else {
-                    DBUG1("Connecting finish -> bottom")
-                    tmp = NULL;
-                    get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
-                    if (tmp) {
-                        // move it up
-                        while (!has_intersection(*tmp, rectangles)) {
-                            tmp->y += 1;
-                        }
-                        tmp->y -= 1;
-
-                        if (bottom->y > tmp->y)
-                            bottom = tmp;
-
-                        while (tmp && tmp->y > finish->y + finish->h) {
-                            tmp = NULL;
-                            get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
-                            if (tmp) {
-                                while (!has_intersection(*tmp, rectangles)) {
-                                    tmp->y += 1;
-                                }
-                                tmp->y -= 1;
-                                if (bottom->y > tmp->y)
-                                    bottom = tmp;
-                            }
-                        }
-                    }
-                    else {
-                        // need to move it down
-                        rect* tmp = &rectangles[current_idx++];
-                        tmp->x = finish->x + tmp->w;
-                        tmp->y = finish->y + finish->h;
-                        while (!has_intersection(*tmp, rectangles)) {
-                            tmp->y -= 1;
-                        }
-                        tmp->y += 1;
-                        if (bottom->y > tmp->y)
-                        bottom = tmp;
-                    }
-
-                    if (bottom->y > finish->y)
-                        bottom = finish;
-                }
-            }
-            else {
-                // horizontal connecting
-                rect* tmp_bottom = bottom;
-                int dir = DIR_TL;
-                do {
-                    tmp = NULL;
-                    get_leg(finish, rectangles, current_idx, 1, dir, &tmp);
-                    if (tmp) {
-                        if (tmp_bottom->y > tmp->y)
-                            tmp_bottom = tmp;
-                        finish = tmp;
-
-                        if (DIR_TL == dir)
-                            dir = DIR_BL;
-                        else
-                            dir = DIR_TL;
-                    }
-                } while (tmp);
-
-                get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
-                while (tmp) {
-                    while (!has_intersection(*tmp, rectangles)) {
-                        tmp->x -= 1;
-                    }
-                    tmp->x += 1;
-                    if (tmp_bottom->y > tmp->y)
-                        tmp_bottom = tmp;
-                    tmp = NULL;
-                    get_leg(finish, rectangles, current_idx, 1, DIR_BL, &tmp);
-                }
-                if (tmp_bottom->y < bottom->y)
-                    bottom = tmp_bottom;
-            }
-        }
-        else {
-            // small romb
-            tmp = NULL;
-            get_leg(right, rectangles, current_idx, leg_len, DIR_BL, &tmp);
-            if (tmp) {
-                finish = tmp;
-                tmp = NULL;
-                get_leg(finish, rectangles, current_idx, 1, DIR_TL, &tmp);
-                while (tmp) {
-                    while (!has_intersection(*tmp, rectangles)) {
-                        tmp->y -= 1;
-                    }
-                    tmp->y += 1;
-                    tmp = NULL;
-                    get_leg(finish, rectangles, current_idx, 1, DIR_TL, &tmp);
-                }
-                if (bottom->y < finish->y)
-                    bottom = finish;
-            }
-        }
+        if (tmp)
+            finish_romb_b(rectangles, indices_sorted, current_idx, &top, &right, &bottom, &left, tmp, indices_bl);
 
         *ret_bottom = bottom;
         *ret_left = left;
@@ -841,6 +672,57 @@ return;
         *ret_right = right;
 
         *start_idx = current_idx;
+    }
+
+    void finish_romb_b(rect* rectangles, int* indices_sorted, int& current_idx,
+                       rect** ret_top, rect** ret_right, rect** ret_bottom, rect** ret_left, rect* finish, vector<int>& indices_finish) {
+        rect* top = *ret_top;
+        rect* right = *ret_right;
+        rect* bottom = *ret_bottom;
+        rect* left = *ret_left;
+
+        DBUG2("Bottom: ", bottom->i)
+        DBUG2("Right: ", right->i)
+        DBUG2("Finish: ", finish->i)
+
+        // converge
+        int y_block = (bottom->y + finish->y) / 2;
+        rect* tmp_b = bottom;
+        while (tmp_b->y + tmp_b->h < y_block) {
+            rect* r = &rectangles[indices_sorted[current_idx++]];
+            if (rect::O_AX == r->o)
+                r->change_orientation();
+#if defined DEBUG
+            if (r->used)
+                DBUG2("ERROR: used rect: ", r->i);
+#endif
+
+            r->x = tmp_b->x + tmp_b->w;
+            r->y = tmp_b->y + tmp_b->h;
+
+            if (!has_intersection(*r, rectangles)) {
+                DBUG2("Add to bottom: ", r->i)
+                r->used = 1;
+                tmp_b = r;
+            }
+            else {
+                break;
+            }
+        }
+
+//        while (finish->y > tmp_b->y + tmp_b->h) {
+
+//        }
+
+
+        // connect
+        //int
+        //if (bottom->y < finish->y)
+
+        *ret_bottom = bottom;
+        *ret_left = left;
+        *ret_top = top;
+        *ret_right = right;
     }
 
     void run_beam() {
@@ -859,10 +741,12 @@ return;
 
         int start_idx = 1;
 
-        int leg_len = 10;
+        int leg_len = 80;
 
-        make_romb(start, rectangles, &start_idx, leg_len, &ret_bottom, &ret_left, &ret_top, &ret_right);
-        for (int i = 0; i < 100; ++i) {
+        int* indices_sorted = pray->arg_sort();
+
+        make_romb(start, rectangles, indices_sorted, &start_idx, leg_len, &ret_bottom, &ret_left, &ret_top, &ret_right);
+        for (int i = 0; i < 0; ++i) {
             if (!ret_right || ! ret_top)
                 break;
 
@@ -872,7 +756,7 @@ return;
             rect* ret_top2    = NULL;
             rect* ret_right2  = NULL;
 
-            make_romb(start, rectangles, &start_idx, leg_len, &ret_bottom2, &ret_left2, &ret_top2, &ret_right2);
+            make_romb(start, rectangles, indices_sorted, &start_idx, leg_len, &ret_bottom2, &ret_left2, &ret_top2, &ret_right2);
 
             ret_bottom = ret_bottom2;
             ret_top = ret_top2;
