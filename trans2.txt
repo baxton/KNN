@@ -1573,91 +1573,59 @@ praktiсa    практика
 pram    коляска
 prams   коляска
 
-===
-pramy   pramy
 prana   прана
-pranan  пранан
-pranburi    Pranburi
-prandelli   Пранделли
-prasad  прасад
-prasarnkay  prasarnkay
-praseres    praseres
-prasino Prasino
-praslin праслин
-pratel  přátel
-pratelstvi  Přátelství
-pratico Pratico
-pratika Pratika
-pratique    свидетельство о снятии карантина
-prato   Прато
-pratt   прэтт
-pravo   Право
-pravoipraktika  pravoipraktika
-pravoved5   pravoved5
+pranan  прана
+pratique    свидетельство снятие карантин
+pravo   право
+pravoipraktika  право практика
+pravoved5   право
 praxis  практика
-praye   praye
-praying молиться
-prazdnik    Праздник
-prazdnik23  prazdnik23
-prazdnikriadom  prazdnikriadom
-prazeres    Prazeres
-prc КНР
-prc200  prc200
-prcd    PRCD
-prcfile prcfile
-pre предварительно
-pre1    pre1
-preach  проповедовать
-preacher    проповедник
-preadator   Preadator
-preamaman   preamaman
-preamp  предварительный усилитель
-preamplifier    предусилитель
-preamps предусилители
-prebiotisch prebiotisch
-precarbon   precarbon
-preceda preceda
-precede предшествовать
-precessor   precessor
-precharge   головной заряд
-precheza    Прехеза
-preciosa    Preciosa
-precious    драгоценный
+praye   молитва
+praying молитва
+prazdnik    праздник
+prazdnik23  праздник
+prazdnikriadom  праздник
+prcfile файл
+preach  проповедь
+preacher    проповедь
+preadator   хищник
+preamp  усилитель
+preamplifier    усилитель
+preamps усилитель
+prebiotisch пробиотик лекарство
+precarbon   уголь
+preceda предшественник
+precede предшественник
+precessor   предшественник
+precharge   голова заряд
+precious    драгоценность
 precis  конспект
-precise точный
-precisely   точно
+precise точность
+precisely   точность
 precision   точность
-precisionace    precisionace
-precisionase    precisionase
-precisionist    precisionist
-precisionpower  precisionpower
-precission  Precission
-precizne    precizne
-preco   Preco
-precor  Precor
+precisionace    точность
+precisionase    точность
+precisionist    точность человек
+precisionpower  точность сила
+precission  точность
+precizne    точность
 precursor   предшественник
-predaplata  predaplata
-predar  predar
+predaplata  оплата деньги
+predar  хищник
 predator    хищник
-predators   хищники
-predictable предсказуемый
-predictive  предсказывающий
-predios predios
-predmetov   predmetov
-predmety    předměty
-predom  PREDOM
-preempt упредить
-preen   прихорашиваться
-prefabet    Prefabet
-prefbet prefbet
-preferent   preferent
+predators   хищник
+predictable предсказуемость
+predictive  предсказуемость
+predmetov   предмет вещь
+predmety    предмет вещь
+preempt упрежденик
+preen   хороший 
+===
+
 prefix  префикс
-preforma    преформа
-preg    бере
-pregio  Pregio
-prego   Prego
-preimushhestva  preimushhestva
-preinstalled    предустановленной
+preforma    форма
+preimushhestva  преимущество
+preinstalled    предустановка
 preintermediate preintermediate
 preis   Preis
 preline PreLine
