@@ -6,8 +6,10 @@
 // To test asteroid detector
 // g++ -DTEST_DETECTOR --std=c++0x -W -Wall -Wno-sign-compare -O2 -s -pipe -mmmx -msse -msse2 -msse3 random_forest.cpp -o random_forest.exe
 //
-// java -Xmx1024m -jar /c/Temp/asteroid/data/tester.jar -folder /c/Temp/asteroid/data/traindata/ -train /c/Temp/asteroid/data/traindata.txt -test /c/Temp/asteroid/data/traindata.txt -exec /c/Temp/asteroid/scripts/random_forest.exe -seed 1 -vis 2
+// Fast test
+// g++ -DTEST_FAST --std=c++0x -W -Wall -Wno-sign-compare -O2 -s -pipe -mmmx -msse -msse2 -msse3 random_forest.cpp -o random_forest.exe
 //
+
 
 #include <cstdlib>
 #include <time.h>
@@ -20,61 +22,66 @@ using namespace std;
 #define FOR_SUBMISSION
 
 
-#define LOG(x)
-#define LOG1(x, a1)
-#define LOG2(x, a1, a2)
-#define LOG3(x, a1, a2, a3)
-#define LOG4(x, a1, a2, a3, a4)
-#define LOG5(x, a1, a2, a3, a4, a5)
+#define LOG
 
 
 #if defined TEST_DETECTOR
-#   include <cstdio>
+#   include <sstream>
+#   include <iostream>
+#   include <fstream>
+
+#   undef FOR_SUBMISSION
+
+struct app {
+    ofstream log_;
+
+    app() {
+        log_.open("C:\\Temp\\asteroid\\logs\\detector.txt", ofstream::out);
+    }
+    ~app() {
+        log_.close();
+    }
+
+    ostream& log() { return log_; }
+} app;
+
+#   undef LOG
+#   define LOG app.log()
+#endif // TEST_DETECTOR
+
+
+#if defined TEST_FAST
+#   include <sstream>
+#   include <iostream>
+#   include <fstream>
+
+#   undef FOR_SUBMISSION
+
+struct app {
+    ofstream log_;
+
+    app() {
+        log_.open("C:\\Temp\\asteroid\\logs\\detector.txt", ofstream::out);
+    }
+    ~app() {
+        log_.close();
+    }
+
+    ostream& log() { return log_; }
+} app;
+
+#   undef LOG
+#   define LOG app.log()
+#endif // TEST_FAST
+
+
+#if defined TEST_UTILS
 #   include <iostream>
 
 #   undef FOR_SUBMISSION
 
-struct logger {
-    FILE* pf_;
-    logger() { pf_ = ::fopen("C:\\Temp\\asteroid\\logs\\detector.txt", "w+"); }
-    ~logger() { ::fclose(pf_); }
-    operator FILE* () { return pf_; }
-} logger;
-
 #   undef LOG
-#   undef LOG1
-#   undef LOG2
-#   undef LOG3
-#   undef LOG4
-#   undef LOG5
-
-#   define LOG(x) {fprintf(logger, x); fflush(logger);}
-#   define LOG1(x, a1) {fprintf(logger, x, a1); fflush(logger);}
-#   define LOG2(x, a1, a2) {fprintf(logger, x, a1, a2); fflush(logger);}
-#   define LOG3(x, a1, a2, a3) {fprintf(logger, x, a1, a2, a3); fflush(logger);}
-#   define LOG4(x, a1, a2, a3, a4) {fprintf(logger, x, a1, a2, a3, a4); fflush(logger);}
-#   define LOG5(x, a1, a2, a3, a4, a5) {fprintf(logger, x, a1, a2, a3, a4, a5); fflush(logger);}
-#endif // TEST_DETECTOR
-
-
-#if defined TEST_UTILS
-#   include <cstdio>
-
-#   undef FOR_SUBMISSION
-
-#   undef LOG
-#   undef LOG1
-#   undef LOG2
-#   undef LOG3
-#   undef LOG4
-#   undef LOG5
-
-#   define LOG(x) {printf(x);}
-#   define LOG1(x, a1) {printf(x, a1);}
-#   define LOG2(x, a1, a2) {printf(x, a1, a2);}
-#   define LOG3(x, a1, a2, a3) {printf(x, a1, a2, a3);}
-#   define LOG4(x, a1, a2, a3, a4) {printf(x, a1, a2, a3, a4);}
-#   define LOG5(x, a1, a2, a3, a4, a5) {printf(x, a1, a2, a3, a4, a5);}
+#   define LOG cout
 #endif  // TEST
 
 
@@ -88,6 +95,17 @@ bool equal(double v1, double v2) {
     if (::abs(v1 - v2) < 0.0001)
         return true;
     return false;
+}
+
+void detection_parser(const std::string& detection,
+                      int& id,
+                      int& img_id,
+                      double& ra,
+                      double& dec,
+                      double& x,
+                      double& y,
+                      double& mag,
+                      int& neo) {
 }
 
 //
@@ -574,7 +592,34 @@ public:
 };
 
 
+///////////////////////////////////////////////////////////////////////////////
+//
+// Star Object
+//
+///////////////////////////////////////////////////////////////////////////////
 
+// I investigate a square 10x10
+#define AREA_WIDTH 10
+
+struct star_object {
+    enum {
+        RA_IDX = 0,
+        DEC_IDX,
+        RA_ADJ_IDX,
+        DEC_ADJ_IDX,
+        X_IDX,
+        Y_IDX,
+        X_ADJ_IDX,
+        Y_ADJ_IDX,
+        MAG_IDX,
+    };
+
+    // image data
+    double img[AREA_WIDTH * AREA_WIDTH];
+
+    // RA, DEC, RA_adjusted, DEC_adjusted, x, y, x_adjusted, y_adjusted, magnitude
+    double attributes[8];
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -583,6 +628,10 @@ public:
 ///////////////////////////////////////////////////////////////////////////////
 
 class AsteroidDetector {
+
+
+
+
 
 public:
 
@@ -651,120 +700,203 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
+template<class T>
+void vectors_reserve(T v[4], int size) {
+    v[0].reserve(size);
+    v[1].reserve(size);
+    v[2].reserve(size);
+    v[3].reserve(size);
+}
+
+template<class T>
+void vectors_clear(T v[4]) {
+    v[0].clear();
+    v[1].clear();
+    v[2].clear();
+    v[3].clear();
+}
+
+void read_img(int size, vector<int>& data, vector<string>& headers, vector<double>& wcs) {
+    string line;
+    int v_int;
+    double v_double;
+
+    for (int i = 0; i < size; ++i) {
+        std::getline(cin, line);
+        v_int = std::atoi(line.c_str());
+        data.push_back(v_int);
+    }
+
+    std::getline(cin, line);
+    v_int = std::atoi(line.c_str());   // N headers
+    for (int i = 0; i < v_int; ++i) {
+        std::getline(cin, line);
+        headers.push_back(line);
+    }
+
+    for (int i = 0; i < 8; ++i) {
+        std::getline(cin, line);
+        v_double = atof(line.c_str());
+        wcs.push_back(v_double);
+    }
+}
+
+void save_train_set(int set_id, int width, int height, vector<int> imageData[4], vector<string> header[4], vector<double> wcs[4], vector<string> detections) {
+    std::stringstream ss;
+    ss << "C:\\Temp\\asteroid\\data2\\train_" << set_id << ".txt";
+    ofstream ofs;
+    ofs.open(ss.str(), std::ofstream::out);
+
+    ofs << width << endl << height << endl;
+
+    for (int idx = 0; idx < 4; ++idx)
+    {
+        int size = imageData[idx].size();
+        for (int i = 0; i < size; ++i) {
+            ofs << imageData[idx][i] << endl;
+        }
+        size = header[idx].size();
+        ofs << size << endl;
+        for (int i = 0; i < size; ++i) {
+            ofs << header[idx][i] << endl;
+        }
+        for (int i = 0; i < 8; ++i) {
+            ofs << wcs[idx][i] << endl;
+        }
+    }
+
+    int size = detections.size();
+    ofs << size << endl;
+    for (int i = 0; i < size; ++i) {
+        ofs << detections[i];
+        if (i < size - 1)
+            ofs << endl;
+    }
+
+    ofs.flush();
+    ofs.close();
+}
+
+void save_test_set(int set_id, int width, int height, vector<int> imageData[4], vector<string> header[4], vector<double> wcs[4]) {
+    std::stringstream ss;
+    ss << "C:\\Temp\\asteroid\\data2\\test_" << set_id << ".txt";
+    ofstream ofs;
+    ofs.open(ss.str(), std::ofstream::out);
+
+    ofs << width << endl << height << endl;
+
+    for (int idx = 0; idx < 4; ++idx)
+    {
+        int size = imageData[idx].size();
+        for (int i = 0; i < size; ++i) {
+            ofs << imageData[idx][i] << endl;
+        }
+        size = header[idx].size();
+        ofs << size << endl;
+        for (int i = 0; i < size; ++i) {
+            ofs << header[idx][i] << endl;
+        }
+        for (int i = 0; i < 8; ++i) {
+            ofs << wcs[idx][i];
+            if (idx == 3 && i < 7)
+                ofs << endl;
+        }
+    }
+    ofs.flush();
+    ofs.close();
+}
+
+
 void read_data() {
     AsteroidDetector detector;
 
-    vector<int> imageData[3];
-    vector<string> header[3];
-    vector<double> wcs[3];
+    vector<int> imageData[4];
+    vector<string> header[4];
+    vector<double> wcs[4];
     vector<string> detections;
 
-    int width, height, N, v;
-    double d;
-    string str;
+    string line;
+
+    // train
+    int cur_train_set = 0;
+    int max_train_set = 5;
 
     for (int i = 0; i < 100; ++i) {
-        LOG1("Start #%d\n", i)
+        vectors_clear(imageData);
+        vectors_clear(header);
+        vectors_clear(wcs);
+        detections.clear();
 
-        cin >> width;
-        cin >> height;
-        LOG2("W/H: %d / %d\n", width, height)
+        // width & hight
+        std::getline(cin, line);
+        int width = std::atoi(line.c_str());
+        std::getline(cin, line);
+        int height = std::atoi(line.c_str());
         int size = width * height;
 
-        imageData[0].reserve(size);
-        imageData[1].reserve(size);
-        imageData[2].reserve(size);
-
-        detections.clear();
-        for (int j = 0; j < 3; ++j) {
-            imageData[j].clear();
-            header[j].clear();
-            wcs[j].clear();
-
-            for (int n = 0; n < size; ++n) {
-                cin >> v;
-                imageData[j].push_back(v);
-            }
-
-            cin >> N;
-            LOG1("  headers: %d\n", N)
-            for (int n = 0; n < N; ++n) {
-                std::getline(cin, str);
-                header[j].push_back(str);
-                LOG1("   h: %s\n", str.c_str())
-            }
-
-            for (int n = 0; n < 8; ++n) {
-                cin >> d;
-                wcs[j].push_back(d);
-                LOG1("   wcs: %f\n", d)
-            }
-
-
-        }
+        vectors_reserve(imageData, size);
+        read_img(size, imageData[0], header[0], wcs[0]);
+        read_img(size, imageData[1], header[1], wcs[1]);
+        read_img(size, imageData[2], header[2], wcs[2]);
+        read_img(size, imageData[3], header[3], wcs[3]);
 
         // detections
-        cin >> N;
-        LOG1("   detections: %d\n", N)
-        for (int n = 0; n < N; ++n) {
-            std::getline(cin, str);
-            detections.push_back(str);
-            LOG1("   d: %s\n", str.c_str())
+        std::getline(cin, line);
+        int v_int = std::atoi(line.c_str());
+        for (int n = 0; n < v_int; ++n) {
+            std::getline(cin, line);
+            detections.push_back(line);
         }
 
         int res = detector.trainingData(width, height, imageData[0], header[0], wcs[0], imageData[1], header[1], wcs[1], imageData[2], header[2], wcs[2], imageData[3], header[3], wcs[3], detections);
-        res = 1;
+
+        // for debugging
+        ++cur_train_set;
+        if (cur_train_set >= max_train_set) {
+            res = 1;
+        }
+        save_train_set(cur_train_set, width, height, imageData, header, wcs, detections);
+        //
+
         cout << res << endl;
 
         if (res == 1)
             break;
-    }
+    }   // end of train
+
+
+    // test
+    int cur_test_set = 0;
 
     for (int i = 0; i < 20; ++i) {
-        LOG1("Start test #%d\n", i)
+        vectors_clear(imageData);
+        vectors_clear(header);
+        vectors_clear(wcs);
 
-        string imageID;
-        cin >> imageID;
-        LOG1("   imageID: %s\n", imageID.c_str())
+        std::getline(cin, line);
+        string imageID = line;
 
-        cin >> width;
-        cin >> height;
-        LOG2("   W/H: %d / %d\n", width, height)
+        // width & hight
+        std::getline(cin, line);
+        int width = std::atoi(line.c_str());
+        std::getline(cin, line);
+        int height = std::atoi(line.c_str());
         int size = width * height;
 
-        imageData[0].reserve(size);
-        imageData[1].reserve(size);
-        imageData[2].reserve(size);
-
-        detections.clear();
-        for (int j = 0; j < 3; ++j) {
-            imageData[j].clear();
-            header[j].clear();
-            wcs[j].clear();
-
-            for (int n = 0; n < size; ++n) {
-                cin >> v;
-                imageData[j].push_back(v);
-            }
-
-            cin >> N;
-            LOG1("  headers: %d\n", N)
-            for (int n = 0; n < N; ++n) {
-                std::getline(cin, str);
-                header[j].push_back(str);
-                LOG1("   h: %s\n", str.c_str())
-            }
-
-            for (int n = 0; n < 8; ++n) {
-                cin >> d;
-                wcs[j].push_back(d);
-                LOG1("   wcs: %f\n", d)
-            }
-        }
+        vectors_reserve(imageData, size);
+        read_img(size, imageData[0], header[0], wcs[0]);
+        read_img(size, imageData[1], header[1], wcs[1]);
+        read_img(size, imageData[2], header[2], wcs[2]);
+        read_img(size, imageData[3], header[3], wcs[3]);
 
         int res = detector.testingData(imageID, width, height, imageData[0], header[0], wcs[0], imageData[1], header[1], wcs[1], imageData[2], header[2], wcs[2], imageData[3], header[3], wcs[3]);
         cout << res << endl;
+
+        ++cur_test_set;
+        save_test_set(cur_test_set, width, height, imageData, header, wcs);
     }
+
+    // result
 
     vector<string> result = detector.getAnswer();
 
@@ -782,6 +914,7 @@ void read_data() {
 
 
 
+
 #if defined TEST_UTILS
 
 void test_linalg();
@@ -789,7 +922,7 @@ void test_optimize();
 
 int main(int argc, char* argv[]) {
 
-    LOG("Testing utils:\n")
+    //LOG("Testing utils:")
     test_linalg();
     test_optimize();
 
@@ -813,7 +946,7 @@ void test_linalg() {
 
         // 1*2 + 2*3 + 3*4 = 20
         if (r != 20.)
-            LOG1("ERROR: test_linalg #1, dot = [%f], expected 20\n", r)
+            ;//LOG2("ERROR: test_linalg #1, dot = [", r, "], expected 20\n")
         else
             ++success_tests;
         ++total_tests;
@@ -831,7 +964,7 @@ void test_linalg() {
 
         // [20, 20, 20]
         if (r.get()[0] != 20. || r.get()[1] != 20. || r.get()[2] != 20.)
-            LOG3("ERROR: test_linalg #2, dot_m_to_v [%f, %f, %f], expected [20,20,20]", r.get()[0], r.get()[1], r.get()[2])
+            ;//LOG3("ERROR: test_linalg #2, dot_m_to_v [%f, %f, %f], expected [20,20,20]", r.get()[0], r.get()[1], r.get()[2])
         else
             ++success_tests;
         ++total_tests;
@@ -839,7 +972,7 @@ void test_linalg() {
         linalg::dot_v_to_m(v.get(), m, r.get(), 3, 3);
         // [9, 18, 27]
         if (r.get()[0] != 9. || r.get()[1] != 18. || r.get()[2] != 27.)
-            LOG3("ERROR: test_linalg #2, dot_v_to_m [%f, %f, %f], expected [9,18,27]", r.get()[0], r.get()[1], r.get()[2])
+            ;//LOG3("ERROR: test_linalg #2, dot_v_to_m [%f, %f, %f], expected [9,18,27]", r.get()[0], r.get()[1], r.get()[2])
         else
             ++success_tests;
         ++total_tests;
@@ -858,7 +991,7 @@ void test_linalg() {
         linalg::dot_v_to_m(v.get(), m, r.get(), 4, 3);
         // [14, 28, 42]
         if (r.get()[0] != 14. || r.get()[1] != 28. || r.get()[2] != 42.)
-            LOG3("ERROR: test_linalg #3, dot_v_to_m [%f, %f, %f], expected [14,28,42]", r.get()[0], r.get()[1], r.get()[2])
+            ;//LOG3("ERROR: test_linalg #3, dot_v_to_m [%f, %f, %f], expected [14,28,42]", r.get()[0], r.get()[1], r.get()[2])
         else
             ++success_tests;
         ++total_tests;
@@ -874,7 +1007,7 @@ void test_linalg() {
 
         linalg::pow(2., v.get(), 4);
         if (v.get()[0] != 4. || v.get()[1] != 9. || v.get()[2] != 16. || v.get()[3] != 25.)
-            LOG4("ERROR: test_linalg #4, pow [%f, %f, %f, %f], expected [4,9,16,25]", v.get()[0], v.get()[1], v.get()[2], v.get()[3])
+            ;//LOG4("ERROR: test_linalg #4, pow [%f, %f, %f, %f], expected [4,9,16,25]", v.get()[0], v.get()[1], v.get()[2], v.get()[3])
         else
             ++success_tests;
         ++total_tests;
@@ -891,7 +1024,7 @@ void test_linalg() {
 
         linalg::pow(2., v.get(), r.get(), 4);
         if (r.get()[0] != 4. || r.get()[1] != 9. || r.get()[2] != 16. || r.get()[3] != 25.)
-            LOG4("ERROR: test_linalg #5, pow [%f, %f, %f, %f], expected [4,9,16,25]", r.get()[0], r.get()[1], r.get()[2], r.get()[3])
+            ;//LOG4("ERROR: test_linalg #5, pow [%f, %f, %f, %f], expected [4,9,16,25]", r.get()[0], r.get()[1], r.get()[2], r.get()[3])
         else
             ++success_tests;
         ++total_tests;
@@ -905,7 +1038,7 @@ void test_linalg() {
         linalg::sub(v, y, d.get(), 5);
 
         if (d.get()[0] != -4. || d.get()[1] != -2. || d.get()[2] != 0. || d.get()[3] != 2. || d.get()[4] != 4.) {
-            LOG5("ERROR: test_linalg #6, sub [%f, %f, %f, %f, %f], expected [-4,-2,0,2,4]", d.get()[0], d.get()[1], d.get()[2], d.get()[3], d.get()[4])
+            ;//LOG5("ERROR: test_linalg #6, sub [%f, %f, %f, %f, %f], expected [-4,-2,0,2,4]", d.get()[0], d.get()[1], d.get()[2], d.get()[3], d.get()[4])
         }
         else
             ++success_tests;
@@ -922,7 +1055,7 @@ void test_linalg() {
         linalg::pow(2., d.get(), tmp.get(), 5);
 
         if (tmp.get()[0] != 16. || tmp.get()[1] != 4. || tmp.get()[2] != 0. || tmp.get()[3] != 4. || tmp.get()[4] != 16.) {
-            LOG5("ERROR: test_linalg #7, pow [%f, %f, %f, %f, %f], expected [16,4,0,4,16]\n", tmp.get()[0], tmp.get()[1], tmp.get()[2], tmp.get()[3], tmp.get()[4])
+            ;//LOG5("ERROR: test_linalg #7, pow [%f, %f, %f, %f, %f], expected [16,4,0,4,16]\n", tmp.get()[0], tmp.get()[1], tmp.get()[2], tmp.get()[3], tmp.get()[4])
         }
         else
             ++success_tests;
@@ -935,7 +1068,7 @@ void test_linalg() {
         linalg::div(2., v, v, 4);
 
         if (v[0] != 1. || v[1] != 2. || v[2] != 2.5 || v[3] != 3.) {
-            LOG4("ERROR: test_linalg #8, div [%f, %f, %f, %f], expected [1,2,2.5,3]\n", v[0], v[1], v[2], v[3])
+            ;//LOG4("ERROR: test_linalg #8, div [%f, %f, %f, %f], expected [1,2,2.5,3]\n", v[0], v[1], v[2], v[3])
         }
         else
             ++success_tests;
@@ -948,14 +1081,14 @@ void test_linalg() {
         double s = linalg::sum(v, 4);
 
         if (s != 17.) {
-            LOG1("ERROR: test_linalg #9, sum [%f], expected [17]\n", s)
+            ;//LOG1("ERROR: test_linalg #9, sum [%f], expected [17]\n", s)
         }
         else
             ++success_tests;
         ++total_tests;
     }
 
-    LOG2("Finished: test_linalg, %d of %d\n", success_tests, total_tests)
+    //LOG3("Finished: test_linalg, ", success_tests, " of ", total_tests)
 }
 
 
@@ -980,7 +1113,7 @@ void test_optimize() {
 
         if (tmp_E != E ||
             tmp_grad.get()[0] != grad[0] || tmp_grad.get()[1] != grad[1]) {
-            LOG3("ERROR: test_optimize #1, E [%f] grad [%f, %f], expected 25.5, [22,28]", tmp_E, tmp_grad.get()[0], tmp_grad.get()[1])
+            ;//LOG3("ERROR: test_optimize #1, E [%f] grad [%f, %f], expected 25.5, [22,28]", tmp_E, tmp_grad.get()[0], tmp_grad.get()[1])
         }
         else {
             ++success_tests;
@@ -1001,7 +1134,7 @@ void test_optimize() {
         optimize::minimize_gc(theta, X, 4, 2, Y, optimize::quadratic_cost, 100);
 
         if (!equal(theta[0], 1.942131) || !equal(theta[1], 2.013460)) {
-            LOG2("ERROR: test_optimize #2, theta [%f, %f], expected [1.942131, 2.013460]\n", theta[0], theta[1])
+            ;//LOG2("ERROR: test_optimize #2, theta [%f, %f], expected [1.942131, 2.013460]\n", theta[0], theta[1])
         }
         else {
             ++success_tests;
@@ -1038,7 +1171,7 @@ void test_optimize() {
         optimize::minimize_gc(theta, X, rows, columns, Y, optimize::logistic_cost, 100);
 
         if (!equal(theta[0], bm_theta[0]) || !equal(theta[1], bm_theta[1])) {
-            LOG4("ERROR: test_optimize #2, theta [%f, %f], expected [%f, %f]\n", theta[0], theta[1], bm_theta[0], bm_theta[1])
+            ;//LOG4("ERROR: test_optimize #2, theta [%f, %f], expected [%f, %f]\n", theta[0], theta[1], bm_theta[0], bm_theta[1])
         }
         else {
             ++success_tests;
@@ -1047,7 +1180,172 @@ void test_optimize() {
         ++total_tests;
     }
 
-    LOG2("Finished: test_optimize, %d of %d\n", success_tests, total_tests)
+    //LOG2("Finished: test_optimize, %d of %d\n", success_tests, total_tests)
 }
 
 #endif  // TEST_UTILS
+
+
+
+
+
+#if defined TEST_FAST
+
+void read_data();
+
+int main(int argc, char* argv[]) {
+
+    read_data();
+
+    return 0;
+}
+
+template<class T>
+void vectors_reserve(T v[4], int size) {
+    v[0].reserve(size);
+    v[1].reserve(size);
+    v[2].reserve(size);
+    v[3].reserve(size);
+}
+
+template<class T>
+void vectors_clear(T v[4]) {
+    v[0].clear();
+    v[1].clear();
+    v[2].clear();
+    v[3].clear();
+}
+
+void read_img(int size, vector<int>& data, vector<string>& headers, vector<double>& wcs) {
+    string line;
+    int v_int;
+    double v_double;
+
+    for (int i = 0; i < size; ++i) {
+        std::getline(cin, line);
+        v_int = std::atoi(line.c_str());
+        data.push_back(v_int);
+    }
+
+    std::getline(cin, line);
+    v_int = std::atoi(line.c_str());   // N headers
+    for (int i = 0; i < v_int; ++i) {
+        std::getline(cin, line);
+        headers.push_back(line);
+        //LOG << line << endl;
+    }
+    //LOG << "======" << endl;
+
+    for (int i = 0; i < 8; ++i) {
+        std::getline(cin, line);
+        v_double = atof(line.c_str());
+        wcs.push_back(v_double);
+    }
+}
+
+void read_data() {
+    AsteroidDetector detector;
+
+    vector<int> imageData[4];
+    vector<string> header[4];
+    vector<double> wcs[4];
+    vector<string> detections;
+
+    string line;
+
+    // train
+    int cur_train_set = 0;
+    int max_train_set = 5;
+
+    for (int i = 0; i < 100; ++i) {
+        vectors_clear(imageData);
+        vectors_clear(header);
+        vectors_clear(wcs);
+        detections.clear();
+
+        // width & hight
+        std::getline(cin, line);
+        int width = std::atoi(line.c_str());
+        std::getline(cin, line);
+        int height = std::atoi(line.c_str());
+        int size = width * height;
+
+        vectors_reserve(imageData, size);
+        read_img(size, imageData[0], header[0], wcs[0]);
+        read_img(size, imageData[1], header[1], wcs[1]);
+        read_img(size, imageData[2], header[2], wcs[2]);
+        read_img(size, imageData[3], header[3], wcs[3]);
+
+        // detections
+        std::getline(cin, line);
+        int v_int = std::atoi(line.c_str());
+        for (int n = 0; n < v_int; ++n) {
+            std::getline(cin, line);
+            detections.push_back(line);
+            LOG << line << endl;
+        }
+        LOG << "====" << endl;
+
+        int res = detector.trainingData(width, height, imageData[0], header[0], wcs[0], imageData[1], header[1], wcs[1], imageData[2], header[2], wcs[2], imageData[3], header[3], wcs[3], detections);
+
+        // for debugging
+        ++cur_train_set;
+        if (cur_train_set >= max_train_set) {
+            res = 1;
+        }
+        //save_train_set(cur_train_set, width, height, imageData, header, wcs, detections);
+        //
+
+        cout << res << endl;
+
+        if (res == 1)
+            break;
+    }   // end of train
+
+/*
+    // test
+    //int cur_test_set = 0;
+
+    for (int i = 0; i < 20; ++i) {
+        vectors_clear(imageData);
+        vectors_clear(header);
+        vectors_clear(wcs);
+
+        std::getline(cin, line);
+        string imageID = line;
+
+        // width & hight
+        std::getline(cin, line);
+        int width = std::atoi(line.c_str());
+        std::getline(cin, line);
+        int height = std::atoi(line.c_str());
+        int size = width * height;
+
+        vectors_reserve(imageData, size);
+        read_img(size, imageData[0], header[0], wcs[0]);
+        read_img(size, imageData[1], header[1], wcs[1]);
+        read_img(size, imageData[2], header[2], wcs[2]);
+        read_img(size, imageData[3], header[3], wcs[3]);
+
+        int res = detector.testingData(imageID, width, height, imageData[0], header[0], wcs[0], imageData[1], header[1], wcs[1], imageData[2], header[2], wcs[2], imageData[3], header[3], wcs[3]);
+        cout << res << endl;
+
+        //++cur_test_set;
+        //save_test_set(cur_test_set, width, height, imageData, header, wcs);
+    }
+
+    // result
+
+    vector<string> result = detector.getAnswer();
+
+    // output result
+    int size = result.size();
+    cout << size << endl;
+    for (int i = 0; i < size; ++i) {
+        cout << result[i] << endl;
+    }
+*/
+}
+
+
+#endif // TEST_FAST
