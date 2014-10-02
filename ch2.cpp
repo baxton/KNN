@@ -28,7 +28,7 @@ using namespace std;
 
 
 
-#define ALIGNMENT  __attribute__((aligned(16))
+#define NOVAL -99.
 
 
 //
@@ -44,6 +44,174 @@ bool equal(double v1, double v2, double e = 0.0001) {
     if (::abs(v1 - v2) < e)
         return true;
     return false;
+}
+
+
+struct counters {
+    double min;
+    double max;
+    double mean;
+    int    cnt;
+
+    counters() :
+        min(NOVAL),
+        max(0.),
+        mean(0.),
+        cnt(0)
+    {}
+
+};
+
+
+struct age_val_map {
+    typedef map<double, vector<counters> > MAP;
+    typedef map<double, vector<counters> >::iterator ITER;
+
+    MAP storage;
+
+    MAP& get() { return storage; }
+
+    void add(const vector<double>& vec) {
+        // age
+        double k = roundf(vec[1] * 10000) / 10000;
+
+        ITER it = storage.find(k);
+        if (it != storage.end()) {
+            for (int i = 0; i < 16; ++i) {
+                if (vec[i] != NOVAL) {
+                    it->second[i].mean += vec[i];
+                    it->second[i].cnt += 1;
+                }
+            }
+        }
+        else  {
+            vector<counters> cnts;
+            for (int i = 0; i < 16; ++i) {
+                cnts.push_back(counters());
+            }
+            for (int i = 0; i < 16; ++i) {
+                if (vec[i] != NOVAL) {
+                    cnts[i].mean = vec[i];
+                    cnts[i].cnt = 1;
+                }
+            }
+
+            storage[k] = cnts;
+        }
+    }
+
+    map<double, vector<double> > as_vectors() {
+        static double means[] = {839.551, -0.443631, -0.443048, 1.51245, -0.162933, -0.0821803, 0.995769, 0.619883, 0.00493325, -0.0546572, -0.0356498, 4.73872, -0.0217742, -0.354779, -0.406458, -0.223038};
+
+        map<double, vector<double> > age_val;
+        vector<double> tmp;
+
+        enum {
+            TOKENS_NUM = 16,
+
+            ID_IDX         = 0,     // ID
+            AGEDAYS_IDX    = 1,
+            GAGEDAYS_IDX   = 2,
+            SEX_IDX        = 3,
+            MUACCM_IDX     = 4,
+            SFTMM_IDX      = 5,
+            BFED_IDX       = 6,
+            WEAN_IDX       = 7,
+            GAGEBRTH_IDX   = 8,
+            MAGE_IDX       = 9,
+            MHTCM_IDX      = 10,
+            MPARITY_IDX    = 11,
+            FHTCM_IDX      = 12,
+            WTKG_IDX       = 13,    // DV
+            LENCM_IDX      = 14,    // DV
+            HCIRCM_IDX     = 15,    // DV
+
+            X_COLUMNS      = 12,
+
+        };
+
+
+        for (ITER it = storage.begin(); it != storage.end(); ++it) {
+            for (int i = 0; i < 16; ++i) {
+                counters& cnts = it->second[i];
+                if (i == SEX_IDX) {
+                    double m = means[SEX_IDX];
+                    if (cnts.cnt) {
+                        m = cnts.mean / cnts.cnt;
+                    }
+                    tmp.push_back(m < 1.5 ? 1 : 2);
+                }
+                else if (i == BFED_IDX) {
+                    double m = means[BFED_IDX];
+                    if (cnts.cnt) {
+                        m = cnts.mean / cnts.cnt;
+                    }
+                    tmp.push_back(m < .5 ? 0 : 1);
+                }
+                else if (i == WEAN_IDX) {
+                    double m = means[WEAN_IDX];
+                    if (cnts.cnt) {
+                        m = cnts.mean / cnts.cnt;
+                    }
+                    tmp.push_back(m < .5 ? 0 : 1);
+                }
+                else if (i == FHTCM_IDX) {
+                    double m = means[FHTCM_IDX];
+                    if (cnts.cnt) {
+                        m = cnts.mean / cnts.cnt;
+                    }
+                    tmp.push_back(m);
+                }
+                else {
+                    if (cnts.cnt) {
+                        tmp.push_back(cnts.mean / cnts.cnt);
+                    }
+                    else {
+                        tmp.push_back(means[i]);
+                    }
+                }
+            }
+
+            age_val[ it->first ] = tmp;
+            tmp.clear();
+        }
+        return age_val;
+    }
+};
+
+
+
+map <double, vector<double> > means(age_val_map& avm) {
+    return avm.as_vectors();
+}
+
+double get_val(double k, int idx, age_val_map& m) {
+    static double means[] = {839.551, -0.443631, -0.443048, 1.51245, -0.162933, -0.0821803, 0.995769, 0.619883, 0.00493325, -0.0546572, -0.0356498, 4.73872, -0.0217742, -0.354779, -0.406458, -0.223038};
+    static map <double, vector<double> > avm = utils::means(m);
+
+    double r = means[idx];
+
+    map <double, vector<double> >::iterator it = avm.lower_bound(k);
+    if (it != avm.end()) {
+        int cnt = 1;
+        r = it->second[idx];
+        map <double, vector<double> >::iterator it2 = it; ++it2;
+        map <double, vector<double> >::iterator it3 = it; ++it3;
+
+        if (it2 != avm.end()) {
+            r += it2->second[idx];
+            ++cnt;
+        }
+
+        if (it3 != avm.end()) {
+            r += it3->second[idx];
+            ++cnt;
+        }
+
+        r /= cnt;
+    }
+
+    return r;
 }
 
 }   // utils
@@ -730,7 +898,7 @@ struct estimator_regressor {
  */
 template<class ESTIMATOR=estimator_regressor, class NODE_VAL=node_val_mean>
 class dtree {
-    memory::ptr<Counter> counter_;
+    memory::ptr<Counter, memory::DESTRUCTOR<Counter> > counter_;
 
     int k_;
     int lnum_;
@@ -757,7 +925,7 @@ public:
         id_(counter_.get()->next())
     {}
 
-    dtree(int k, int lnum, memory::ptr<Counter>& counter) :
+    dtree(int k, int lnum, memory::ptr<Counter, memory::DESTRUCTOR<Counter> >& counter) :
         counter_(counter),
         k_(k),
         lnum_(lnum),
@@ -1040,7 +1208,7 @@ class ChildStuntedness2 {
         LENCM_IDX      = 14,    // DV
         HCIRCM_IDX     = 15,    // DV
 
-        X_COLUMNS      = 12 - 2,
+        X_COLUMNS      = 12,
 
     };
 
@@ -1059,12 +1227,14 @@ class ChildStuntedness2 {
     vector<double> Y2;
     vector<double> Y3;
 
+    utils::age_val_map avm;
+
 
 public:
     ChildStuntedness2() :
-        rf_w(100, 5, 3),
-        rf_l(100, 5, 3),
-        rf_h(100, 5, 3),
+        rf_w(10, 5, 5),
+        rf_l(10, 5, 5),
+        rf_h(10, 5, 5),
         X(),
         Y1(),
         Y2(),
@@ -1079,8 +1249,8 @@ public:
 
     void add_to_data(const vector<double>& vec) {
 
-        //X.push_back( vec[AGEDAYS_IDX] );     // 1
-        //X.push_back( vec[GAGEDAYS_IDX] );    // 2
+        X.push_back( vec[AGEDAYS_IDX] );     // 1
+        X.push_back( vec[GAGEDAYS_IDX] );    // 2
         X.push_back( vec[SEX_IDX] );
         X.push_back( vec[MUACCM_IDX] );
         X.push_back( vec[SFTMM_IDX] );
@@ -1107,7 +1277,7 @@ public:
         for (int i = 0; i < size; ++i) {
             line2vec(train_str[i], tmp);
 
-            preproc(tmp);
+            avm.add(tmp);
 
             add_to_data(tmp);
         }
@@ -1115,9 +1285,16 @@ public:
 
         int rows = Y1.size();
 
+        preproc();
+
         rf_w.fit(&X[0], &Y1[0], rows, X_COLUMNS);
         rf_l.fit(&X[0], &Y2[0], rows, X_COLUMNS);
         rf_h.fit(&X[0], &Y3[0], rows, X_COLUMNS);
+
+        X.clear();
+        Y1.clear();
+        Y2.clear();
+        Y3.clear();
 
         //
         // now do prediction
@@ -1126,21 +1303,22 @@ public:
 
         stringstream ss;
 
+        LOG("predicting")
+
         size = test_str.size();
         for (int i = 0; i < size; ++i) {
             line2vec(test_str[i], tmp);
+            add_to_data(tmp);
+            preproc();
 
-            preproc(tmp);
+            ss << rf_w.predict( &X[0], X_COLUMNS );
+            ss << "," << rf_l.predict( &X[0], X_COLUMNS );
+            ss << "," << rf_h.predict( &X[0], X_COLUMNS );
 
-            ss << rf_w.predict( &tmp[1], X_COLUMNS );
             result.push_back(ss.str());
             ss.str("");
-            ss << rf_l.predict( &tmp[1], X_COLUMNS );
-            result.push_back(ss.str());
-            ss.str("");
-            ss << rf_h.predict( &tmp[1], X_COLUMNS );
-            result.push_back(ss.str());
-            ss.str("");
+
+            X.clear();
         }
 
         return result;
@@ -1152,8 +1330,45 @@ private:
     ChildStuntedness2& operator= (const ChildStuntedness2&);
 
 
-    void preproc(vector<double>& vec) {
-        vec[SEX_IDX] -= 1.;
+    void preproc() {
+/*
+        ID_IDX         = 0,     // ID
+
+        IN X:
+        AGEDAYS_IDX    = 1,
+        GAGEDAYS_IDX   = 2,
+        SEX_IDX        = 3,
+        MUACCM_IDX     = 4,
+        SFTMM_IDX      = 5,
+        BFED_IDX       = 6,
+        WEAN_IDX       = 7,
+        GAGEBRTH_IDX   = 8,
+        MAGE_IDX       = 9,
+        MHTCM_IDX      = 10,
+        MPARITY_IDX    = 11,
+        FHTCM_IDX      = 12,
+
+        IN Ys:
+        WTKG_IDX       = 13,    // DV
+        LENCM_IDX      = 14,    // DV
+        HCIRCM_IDX     = 15,    // DV
+*/
+
+        int size = X.size() / X_COLUMNS;
+
+        for (int i = 0; i < size; ++i) {
+            for (int j = 0; j < 12; ++j) {
+                if (NOVAL == X[i*X_COLUMNS + j]) {
+                    X[i*X_COLUMNS + j] = utils::get_val(X[i*X_COLUMNS + 0], j+1, avm);
+                }
+            }
+
+            //
+
+            X[i*X_COLUMNS + AGEDAYS_IDX - 1] = 0.;
+        }
+
+
     }
 
 
@@ -1165,11 +1380,13 @@ private:
         size_t old_pos = 0;
         size_t pos = line.find(sep, old_pos);
 
+        int idx = 0;
+
         while (std::string::npos != pos) {
             string ss = line.substr(old_pos, pos - old_pos);
 
             if ("." == ss) {
-                vec.push_back(-99.);
+                vec.push_back(NOVAL);
             }
             else {
                 vec.push_back( atof(ss.c_str()) );
@@ -1177,13 +1394,15 @@ private:
 
             old_pos = pos + 1;
             pos = line.find(sep, old_pos);
+
+            ++idx;
         }
 
         if (old_pos != std::string::npos && old_pos < line.length()) {
             string ss = line.substr(old_pos);
 
             if ("." == ss) {
-                vec.push_back(-99.);
+                vec.push_back(NOVAL);
             }
             else {
                 vec.push_back( atof(ss.c_str()) );
@@ -1202,7 +1421,88 @@ private:
 
 
 
+void line2vec(const string& line, vector<double>& vec) {
+    char sep = ',';
+
+    vec.clear();
+
+    size_t old_pos = 0;
+    size_t pos = line.find(sep, old_pos);
+
+    int idx = 0;
+
+    while (std::string::npos != pos) {
+        string ss = line.substr(old_pos, pos - old_pos);
+
+        if ("." == ss) {
+            vec.push_back(0);
+        }
+        else {
+            vec.push_back( atof(ss.c_str()) );
+        }
+
+        old_pos = pos + 1;
+        pos = line.find(sep, old_pos);
+
+        ++idx;
+    }
+
+    if (old_pos != std::string::npos && old_pos < line.length()) {
+        string ss = line.substr(old_pos);
+
+        if ("." == ss) {
+            vec.push_back(0);
+        }
+        else {
+            vec.push_back( atof(ss.c_str()) );
+        }
+    }
+}
+
+
+int process_result(const vector<string>& preds, const vector<string>& y) {
+    int size = y.size();
+
+    int WTKG_IDX       = 13;    // DV
+    int LENCM_IDX      = 14;    // DV
+    int HCIRCM_IDX     = 15;    // DV
+
+    double sse_w = 0.;
+    double sse_l = 0.;
+    double sse_h = 0.;
+
+    for (int i = 0; i < size; ++i) {
+        vector<double> pp;
+        line2vec(preds[i], pp);
+
+        double pw = pp[0];
+        double pl = pp[1];
+        double ph = pp[2];
+
+        vector<double> tmp;
+        line2vec(y[i], tmp);
+
+        sse_w += (pw - tmp[WTKG_IDX]) * (pw - tmp[WTKG_IDX]);
+        sse_l += (pl - tmp[LENCM_IDX]) * (pl - tmp[LENCM_IDX]);
+        sse_h += (ph - tmp[HCIRCM_IDX]) * (ph - tmp[HCIRCM_IDX]);
+    }
+
+    sse_w /= size;
+    sse_l /= size;
+    sse_h /= size;
+
+    sse_w = sqrt(sse_w);
+    sse_l = sqrt(sse_w);
+    sse_h = sqrt(sse_w);
+
+    LOG("SSE W: " << sse_w)
+    LOG("SSE L: " << sse_l)
+    LOG("SSE H: " << sse_h)
+}
+
+
 int main(int, const char**) {
+    //string fname = "/home/maxim/ch2/data/exampleData.csv";
     string fname = "C:\\Temp\\ch2\\data\\exampleData.csv";
 
     ifstream fin;
@@ -1217,6 +1517,8 @@ int main(int, const char**) {
 
     int N = tmp.size();
     int k = (int)(N * .6);
+
+    random::seed();
 
     int indices[k];
     random::get_k_of_n(k, N, indices);
@@ -1248,8 +1550,13 @@ int main(int, const char**) {
 
     for (int i = 0; i < test_str.size(); ++i) {
         size_t pos = test_str[i].find(',');
-        LOG("[" << test_str[i].substr(0,pos) << "] " << result[i*3+0] << "; " << result[i*3+1] << "; " << result[i*3+2])
+        LOG("[" << test_str[i].substr(0,pos) << "] " << result[i])
     }
+
+    process_result(result, test_str);
+
+    LOG("done")
 
     return 0;
 }
+
